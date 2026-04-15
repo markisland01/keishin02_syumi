@@ -124,13 +124,58 @@ export function calcAvgRevenue(revenues) {
   return Math.max(avg2, avg3);
 }
 
-// X1点：完成工事高 → 評点（実経審X1表の近似）
-// 1億円=634点, 10倍ごとに+125点（実表: 1億634→10億763→100億885 にフィット）
+// X1点：完成工事高 → 評点（国交省告示の42区分テーブル）
+// 各区分: { min: 下限(千円), a, b, c } → X1 = floor(a × K / b + c)
+const X1_TABLE = [
+  { min: 100000000, a: 0,   b: 1,         c: 2309 }, // 1,000億円以上
+  { min:  80000000, a: 114, b: 20000000,   c: 1739 }, // 800億〜1,000億
+  { min:  60000000, a: 101, b: 20000000,   c: 1791 }, // 600億〜800億
+  { min:  50000000, a: 88,  b: 10000000,   c: 1566 }, // 500億〜600億
+  { min:  40000000, a: 89,  b: 10000000,   c: 1561 }, // 400億〜500億
+  { min:  30000000, a: 89,  b: 10000000,   c: 1561 }, // 300億〜400億
+  { min:  25000000, a: 75,  b: 5000000,    c: 1378 }, // 250億〜300億
+  { min:  20000000, a: 76,  b: 5000000,    c: 1373 }, // 200億〜250億
+  { min:  15000000, a: 76,  b: 5000000,    c: 1373 }, // 150億〜200億
+  { min:  12000000, a: 64,  b: 3000000,    c: 1281 }, // 120億〜150億
+  { min:  10000000, a: 62,  b: 2000000,    c: 1165 }, // 100億〜120億
+  { min:   8000000, a: 64,  b: 2000000,    c: 1155 }, // 80億〜100億
+  { min:   6000000, a: 50,  b: 2000000,    c: 1211 }, // 60億〜80億
+  { min:   5000000, a: 51,  b: 1000000,    c: 1055 }, // 50億〜60億
+  { min:   4000000, a: 51,  b: 1000000,    c: 1055 }, // 40億〜50億
+  { min:   3000000, a: 50,  b: 1000000,    c: 1059 }, // 30億〜40億
+  { min:   2500000, a: 51,  b: 500000,     c: 903  }, // 25億〜30億
+  { min:   2000000, a: 39,  b: 500000,     c: 963  }, // 20億〜25億
+  { min:   1500000, a: 36,  b: 500000,     c: 975  }, // 15億〜20億
+  { min:   1200000, a: 38,  b: 300000,     c: 893  }, // 12億〜15億
+  { min:   1000000, a: 39,  b: 200000,     c: 811  }, // 10億〜12億
+  { min:    800000, a: 38,  b: 200000,     c: 816  }, // 8億〜10億
+  { min:    600000, a: 25,  b: 200000,     c: 868  }, // 6億〜8億
+  { min:    500000, a: 25,  b: 100000,     c: 793  }, // 5億〜6億
+  { min:    400000, a: 34,  b: 100000,     c: 748  }, // 4億〜5億
+  { min:    300000, a: 42,  b: 100000,     c: 716  }, // 3億〜4億
+  { min:    250000, a: 24,  b: 50000,      c: 698  }, // 2.5億〜3億
+  { min:    200000, a: 28,  b: 50000,      c: 678  }, // 2億〜2.5億
+  { min:    150000, a: 34,  b: 50000,      c: 654  }, // 1.5億〜2億
+  { min:    120000, a: 26,  b: 30000,      c: 626  }, // 1.2億〜1.5億
+  { min:    100000, a: 19,  b: 20000,      c: 616  }, // 1億〜1.2億
+  { min:     80000, a: 22,  b: 20000,      c: 601  }, // 0.8億〜1億
+  { min:     60000, a: 28,  b: 20000,      c: 577  }, // 0.6億〜0.8億
+  { min:     50000, a: 16,  b: 10000,      c: 565  }, // 0.5億〜0.6億
+  { min:     40000, a: 19,  b: 10000,      c: 550  }, // 0.4億〜0.5億
+  { min:     30000, a: 24,  b: 10000,      c: 530  }, // 0.3億〜0.4億
+  { min:     25000, a: 13,  b: 5000,       c: 524  }, // 0.25億〜0.3億
+  { min:     20000, a: 16,  b: 5000,       c: 509  }, // 0.2億〜0.25億
+  { min:     15000, a: 20,  b: 5000,       c: 493  }, // 0.15億〜0.2億
+  { min:     12000, a: 14,  b: 3000,       c: 483  }, // 0.12億〜0.15億
+  { min:     10000, a: 11,  b: 2000,       c: 473  }, // 0.1億〜0.12億
+  { min:         0, a: 131, b: 10000,      c: 397  }, // 0.1億未満
+];
+
 export function calcX1(avgRevenueMan) {
   if (avgRevenueMan <= 0) return 397;
-  const base = 634;
-  const delta = 125 * Math.log10(avgRevenueMan / 10000);
-  return Math.round(Math.max(397, Math.min(2309, base + delta)));
+  const K = avgRevenueMan * 10; // 万円 → 千円
+  const row = X1_TABLE.find(r => K >= r.min);
+  return Math.floor(row.a * K / row.b + row.c);
 }
 
 // X2点：自己資本・平均利益 → 評点（簡易計算）
@@ -158,13 +203,23 @@ export function calcY({ revenue, profitRate, equity, debt, interest }) {
   return Math.round(Math.max(450, Math.min(900, y)));
 }
 
-// Y点：経営状況分析（詳細版・実経審8指標の近似）
-// 実経審公式: Y = 167.3 × A + 583 （A = 8指標評点の平均）
-// 8指標:
-//   1. 純支払利息比率    2. 負債回転期間
-//   3. 総資本売上総利益率 4. 売上高経常利益率
-//   5. 自己資本対固定資産比率 6. 自己資本比率
-//   7. 営業キャッシュフロー(絶対額) 8. 利益剰余金(絶対額)
+// Y点：経営状況分析（詳細版・実経審8指標）
+// 国交省告示の公式: Y = 167.3 × A + 583
+// A = -0.4650×x1 - 0.0508×x2 + 0.0264×x3 + 0.0277×x4
+//   + 0.0011×x5 + 0.0089×x6 + 0.0818×x7 + 0.0172×x8 + 0.1906
+// 各指標は上限・下限でクランプ
+const Y_INDICATORS = [
+  // { coeff, upper, lower }  ※ x1,x2は低いほど良い（係数が負）
+  { coeff: -0.4650, upper: -0.3,   lower: 5.1   }, // x1: 純支払利息比率(%)
+  { coeff: -0.0508, upper:  0.9,   lower: 18.0  }, // x2: 負債回転期間(月)
+  { coeff:  0.0264, upper: 63.6,   lower: 6.5   }, // x3: 総資本売上総利益率(%)
+  { coeff:  0.0277, upper:  5.1,   lower: -8.5  }, // x4: 売上高経常利益率(%)
+  { coeff:  0.0011, upper: 350.0,  lower: -76.5 }, // x5: 自己資本対固定資産比率(%)
+  { coeff:  0.0089, upper: 68.5,   lower: -68.6 }, // x6: 自己資本比率(%)
+  { coeff:  0.0818, upper: 15.0,   lower: -10.0 }, // x7: 営業CF(億円)
+  { coeff:  0.0172, upper: 100.0,  lower: -3.0  }, // x8: 利益剰余金(億円)
+];
+
 export function calcYFull({
   revenue, profitRate, equity, debt, interest,
   grossProfitRate, fixedAssets, operatingCF, retainedEarnings,
@@ -174,29 +229,29 @@ export function calcYFull({
   const grossProfit = revenue * grossProfitRate;
 
   // 8指標の算定値
-  const r1 = (interest / revenue) * 100;                                    // 純支払利息比率(%)
-  const r2 = debt / (revenue / 12);                                         // 負債回転期間(月)
-  const r3 = totalCap > 0 ? (grossProfit / totalCap) * 100 : 0;             // 総資本売上総利益率(%)
-  const r4 = profitRate * 100;                                              // 売上高経常利益率(%)
-  const r5 = fixedAssets > 0 ? (equity / fixedAssets) * 100 : 200;          // 自己資本対固定資産比率(%)
-  const r6 = totalCap > 0 ? (equity / totalCap) * 100 : 0;                  // 自己資本比率(%)
-  const r7 = operatingCF / 10000;                                           // 営業CF(億円)
-  const r8 = retainedEarnings / 10000;                                      // 利益剰余金(億円)
+  const values = [
+    (interest / revenue) * 100,                                    // x1: 純支払利息比率(%)
+    debt / (revenue / 12),                                         // x2: 負債回転期間(月)
+    totalCap > 0 ? (grossProfit / totalCap) * 100 : 0,             // x3: 総資本売上総利益率(%)
+    profitRate * 100,                                              // x4: 売上高経常利益率(%)
+    fixedAssets > 0 ? (equity / fixedAssets) * 100 : 350,          // x5: 自己資本対固定資産比率(%)
+    totalCap > 0 ? (equity / totalCap) * 100 : 0,                 // x6: 自己資本比率(%)
+    operatingCF / 10000,                                           // x7: 営業CF(億円)
+    retainedEarnings / 10000,                                      // x8: 利益剰余金(億円)
+  ];
 
-  // 各指標を 0〜2点 にマッピング（標準=1点）
-  const clip = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
-  const f1 = clip(2 - r1 / 2, 0, 2);          // 0%→2, 4%→0
-  const f2 = clip(2 - (r2 - 1) / 3.5, 0, 2);  // 1月→2, 8月→0
-  const f3 = clip((r3 - 5) / 12.5, 0, 2);     // 5%→0, 30%→2
-  const f4 = clip(r4 / 5, 0, 2);               // 0%→0, 10%→2
-  const f5 = clip((r5 - 50) / 125, 0, 2);     // 50%→0, 300%→2
-  const f6 = clip(r6 / 30, 0, 2);              // 0%→0, 60%→2
-  const f7 = clip(1 + r7 * 0.5, 0, 2);        // 0億→1, 2億→2
-  const f8 = clip(1 + r8 * 0.1, 0, 2);        // 0億→1, 10億→2
+  // A = Σ(coeff × clamp(value, lower, upper)) + 0.1906
+  let A = 0.1906;
+  for (let i = 0; i < 8; i++) {
+    const { coeff, upper, lower } = Y_INDICATORS[i];
+    const lo = Math.min(upper, lower);
+    const hi = Math.max(upper, lower);
+    const clamped = Math.max(lo, Math.min(hi, values[i]));
+    A += coeff * clamped;
+  }
 
-  const A = (f1 + f2 + f3 + f4 + f5 + f6 + f7 + f8) / 8;
   const y = 167.3 * A + 583;
-  return Math.round(Math.max(450, Math.min(900, y)));
+  return Math.round(Math.max(0, Math.min(1595, y)));
 }
 
 // Z点：技術力 → 評点（簡易計算）

@@ -302,31 +302,15 @@ export default function App() {
   function handleInputModeChange(mode) {
     if (mode === 'manual' && inputMode === 'auto') {
       setYears(prev => {
-        const base = prev[0];
-        const constructionBidRatio = Math.max(0, Math.min(1, Number(base.constructionBidRatio ?? 1)));
-        const otherWinRate = Math.max(0, Math.min(1, Number(base.otherWinRate ?? base.winRate ?? 0)));
-        const constructionAvgContractAmount = Math.max(0, Number(base.constructionAvgContractAmount ?? base.avgContractAmount ?? 0));
-        const otherAvgContractAmount = Math.max(0, Number(base.otherAvgContractAmount ?? base.avgContractAmount ?? 0));
-        const monthlyBids = base.staff * base.bidsPerStaff;
-        const constructionMonthlyBids = monthlyBids * constructionBidRatio;
-        const otherMonthlyBids = monthlyBids - constructionMonthlyBids;
-        const totalEstimated0 = Math.round(
-          (constructionMonthlyBids * base.winRate * constructionAvgContractAmount * 12)
-          + (otherMonthlyBids * otherWinRate * otherAvgContractAmount * 12)
-        );
-        const constructionEstimated0 = Math.round(
-          constructionMonthlyBids * base.winRate * constructionAvgContractAmount * 12
-        );
+        const autoScores = calcAllScores(prev, yModel, 'auto');
 
         return prev.map((y, i) => {
-          const mult = Math.pow(revenueGrowthRate, i);
-          const totalEst = Math.round(totalEstimated0 * mult);
-          const constructionEst = Math.round(constructionEstimated0 * mult);
+          const autoScore = autoScores[i] || {};
           return {
             ...y,
-            kanseikoujidaka: constructionEst,
-            uriage: totalEst,
-            motoukeKoujidaka: constructionEst,
+            kanseikoujidaka: Math.round(autoScore.rawRevenue || 0),
+            uriage: Math.round(autoScore.revenueForY || 0),
+            motoukeKoujidaka: Math.round(autoScore.principalRevenue || 0),
           };
         });
       });

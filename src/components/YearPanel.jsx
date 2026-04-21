@@ -503,6 +503,17 @@ export default function YearPanel({
       );
   const isDetailMode = inputUiMode === 'detail';
 
+  function handleInputUiModeChange(mode) {
+    setInputUiMode(mode);
+    if (mode !== 'detail' || inputMode !== 'auto') return;
+
+    if (yearData.otherWinRate == null) onSliderChange('otherWinRate', otherWinRate);
+    if (yearData.constructionAvgContractAmount == null) {
+      onSliderChange('constructionAvgContractAmount', constructionAvgContractAmount);
+    }
+    if (yearData.otherAvgContractAmount == null) onSliderChange('otherAvgContractAmount', otherAvgContractAmount);
+  }
+
   const zInput = yearData.zInput || {};
   const zDetail = score.zDetail || { z1: 0, z2: 0, technicalValue: 0 };
   const wInput = yearData.wInput || {};
@@ -553,16 +564,21 @@ export default function YearPanel({
     { label: 'ISO等', active: Boolean(certification.iso9001 || certification.iso14001 || certification.ecoAction21) },
   ].filter(item => !item.active).slice(0, 3);
 
+  const displayConstructionRevenue = score.rawRevenue ?? estimatedConstructionRevenue;
+  const displayTotalSales = score.revenueForY ?? estimatedTotalSales;
+  const displayPrincipalRevenue = score.principalRevenue ?? principalRevenueValue;
+  const displayOtherSales = Math.max(0, displayTotalSales - displayConstructionRevenue);
+
   const summaryItems = inputMode === 'manual'
     ? [
-        { label: '完成工事高', value: `${(yearData.kanseikoujidaka / 10000).toFixed(2)}億` },
-        { label: '元請完成工事高', value: `${(principalRevenueValue / 10000).toFixed(2)}億` },
-        { label: '売上高', value: `${(yearData.uriage / 10000).toFixed(2)}億` },
+        { label: '完成工事高', value: `${(displayConstructionRevenue / 10000).toFixed(2)}億` },
+        { label: '元請完成工事高', value: `${(displayPrincipalRevenue / 10000).toFixed(2)}億` },
+        { label: '売上高', value: `${(displayTotalSales / 10000).toFixed(2)}億` },
       ]
     : [
-        { label: '推計完成工事高', value: `${(estimatedConstructionRevenue / 10000).toFixed(2)}億` },
-        { label: '推計売上高', value: `${(estimatedTotalSales / 10000).toFixed(2)}億` },
-        { label: '元請完成工事高', value: `${(principalRevenueValue / 10000).toFixed(2)}億` },
+        { label: '推計完成工事高', value: `${(displayConstructionRevenue / 10000).toFixed(2)}億` },
+        { label: '推計売上高', value: `${(displayTotalSales / 10000).toFixed(2)}億` },
+        { label: '元請完成工事高', value: `${(displayPrincipalRevenue / 10000).toFixed(2)}億` },
       ];
 
   return (
@@ -602,7 +618,7 @@ export default function YearPanel({
       >
         {inputMode === 'manual' ? (
           <SectionCard title="完成工事高・元請完成工事高・売上高（手動入力）" accentColor="#1565C0">
-            <ModeToggle value={inputUiMode} onChange={setInputUiMode} />
+            <ModeToggle value={inputUiMode} onChange={handleInputUiModeChange} />
             <SimpleSelectRow
               label="対象業種"
               value={yearData.industry}
@@ -676,7 +692,7 @@ export default function YearPanel({
           </SectionCard>
         ) : (
           <SectionCard title="入札活動（X1点に連動）" accentColor="#1565C0">
-            <ModeToggle value={inputUiMode} onChange={setInputUiMode} />
+            <ModeToggle value={inputUiMode} onChange={handleInputUiModeChange} />
             <SimpleSelectRow
               label="対象業種"
               value={yearData.industry}
@@ -742,7 +758,7 @@ export default function YearPanel({
               {isDetailMode && (
                 <>
                   <br />
-                  推計売上: 工事 {(estimatedConstructionRevenue / 10000).toFixed(2)}億 / 役務・物販 {(estimatedOtherSales / 10000).toFixed(2)}億
+                  推計売上: 工事 {(displayConstructionRevenue / 10000).toFixed(2)}億 / 役務・物販 {(displayOtherSales / 10000).toFixed(2)}億
                 </>
               )}
             </div>

@@ -3,7 +3,11 @@ export const DEFAULT_YEAR_DATA = {
   staff: 2,               // 在宅スタッフ数（名）
   bidsPerStaff: 3.5,      // 1名当たりの月間入札数（件/名/月）
   winRate: 0.30,          // 落札率
+  otherWinRate: 0.30,     // 役務・物販の落札率
   avgContractAmount: 400, // 平均落札金額（万円）
+  constructionBidRatio: 1, // 入札のうち工事案件の割合
+  constructionAvgContractAmount: 400, // 工事の平均落札金額（万円）
+  otherAvgContractAmount: 400, // 役務・物販の平均落札金額（万円）
   profitRate: 0.06,       // 経常利益率
   equity: 3000,           // 自己資本（万円）
   debt: 4000,             // 借入金残高（万円）
@@ -14,23 +18,94 @@ export const DEFAULT_YEAR_DATA = {
   fixedAssets: 2800,      // 固定資産（万円）※総資本の約40%
   operatingCF: 390,       // 営業キャッシュフロー（万円/年）
   retainedEarnings: 1800, // 利益剰余金（万円）
+  // --- 手動入力モード用（inputMode === 'manual' の時のみ有効） ---
+  kanseikoujidaka: 10000, // 完成工事高（万円/年）≒ 1億円
+  uriage: 10000,          // 売上高（万円/年）
+  motoukeSameAsKansei: true,
+  motoukeKoujidaka: 10000, // 元請完成工事高（万円/年）
+  avgMethod: '2year',
+  industry: '土木一式',
   // ---
-  level1: 1,              // 1級技術者数
-  level2: 2,              // 2級技術者数
+  level1: 0,              // 1級技術者数（旧互換）
+  level2: 0,              // 2級技術者数（旧互換）
+  zInput: {
+    level1WithCertificate: 0,
+    level1: 0,
+    kanriAssistant: 0,
+    coreSkill: 0,
+    level2: 0,
+    other: 0,
+  },
   wItems: {
-    socialInsurance: true,
-    kenkyukyo: true,
+    socialInsurance: false,
+    kenkyukyo: false,
     legalAccident: false,
     retirementPlan: false,
     iso9001: false,
     iso14001: false,
     youngWorkers: false,
   },
+  wInput: {
+    welfare: {
+      kentaikyo: false,
+      retirementOrPension: false,
+      extraAccident: false,
+      youngEngineerRatio: false,
+      newYoungEngineerRatio: false,
+      skillUpScore: 0,
+      workLifeBalance: 'none',
+      careerHistory: 'none',
+      declaration: false,
+    },
+    continuity: {
+      businessYears: 0,
+      rehabilitation: 'none',
+      disasterSupport: false,
+      legalAction: 'none',
+    },
+    accounting: {
+      auditStatus: 'none',
+      cpaCount: 0,
+      level2AccountingCount: 0,
+    },
+    research: {
+      amount: 0,
+    },
+    machinery: {
+      eligibleCount: 0,
+    },
+    certification: {
+      iso9001: false,
+      iso14001: false,
+      ecoAction21: false,
+    },
+  },
 };
 
 export const RANK_THRESHOLDS = { A: 900, B: 800, C: 700 };
 
 export const RANK_TARGET_OPTIONS = ['C', 'B', 'A'];
+
+export const AVERAGE_METHOD_OPTIONS = [
+  { value: '2year', label: '2年平均' },
+  { value: '3year', label: '3年平均' },
+];
+
+export const INDUSTRY_OPTIONS = [
+  '土木一式', '建築一式', '大工', '左官', 'とび・土工・コンクリート', '石', '屋根',
+  '電気', '管', 'タイル・れんが・ブロック', '鋼構造物', '鉄筋', '舗装', 'しゅんせつ',
+  '板金', 'ガラス', '塗装', '防水', '内装仕上', '機械器具設置', '熱絶縁', '電気通信',
+  '造園', 'さく井', '建具', '水道施設', '消防施設', '清掃施設', '解体',
+];
+
+export const Z_TECHNICAL_ROLE_FIELDS = [
+  { key: 'level1WithCertificate', label: '監理資格者証ありの1級', points: 6 },
+  { key: 'level1', label: '1級資格者', points: 5 },
+  { key: 'kanriAssistant', label: '監理技術者補佐', points: 4 },
+  { key: 'coreSkill', label: '登録基幹技能者・レベル4', points: 3 },
+  { key: 'level2', label: '2級資格者・1級技能士・レベル3', points: 2 },
+  { key: 'other', label: '実務経験者などその他', points: 1 },
+];
 
 // スライダーの設定
 export const SLIDER_CONFIGS = {
@@ -86,6 +161,18 @@ export const SLIDER_CONFIGS = {
     label: '利益剰余金',
     min: 0, max: 100000, step: 100, unit: '万円',
   },
+  kanseikoujidaka: {
+    label: '完成工事高',
+    min: 0, max: 500000, step: 100, unit: '万円/年',
+  },
+  uriage: {
+    label: '売上高',
+    min: 0, max: 500000, step: 100, unit: '万円/年',
+  },
+  motoukeKoujidaka: {
+    label: '元請完成工事高',
+    min: 0, max: 500000, step: 100, unit: '万円/年',
+  },
   level1: {
     label: '1級技術者数',
     min: 0, max: 15, step: 1, unit: '名',
@@ -95,6 +182,42 @@ export const SLIDER_CONFIGS = {
     min: 0, max: 15, step: 1, unit: '名',
   },
 };
+
+export const W_WORK_LIFE_BALANCE_OPTIONS = [
+  { value: 'none', label: '認定なし', points: 0 },
+  { value: 'eruboshi1', label: 'えるぼし（第1段階）', points: 2 },
+  { value: 'eruboshi2', label: 'えるぼし（第2段階）', points: 3 },
+  { value: 'eruboshi3', label: 'えるぼし（第3段階）', points: 4 },
+  { value: 'platinumEruboshi', label: 'プラチナえるぼし', points: 5 },
+  { value: 'tryKurumin', label: 'トライくるみん', points: 3 },
+  { value: 'kurumin', label: 'くるみん', points: 3 },
+  { value: 'platinumKurumin', label: 'プラチナくるみん', points: 5 },
+  { value: 'yell', label: 'ユースエール', points: 4 },
+];
+
+export const W_CAREER_HISTORY_OPTIONS = [
+  { value: 'none', label: '就業履歴の蓄積は未実施', points: 0 },
+  { value: 'publicWorks', label: '直近1年の元請公共工事で実施', points: 5 },
+  { value: 'allConstruction', label: '直近1年の元請工事すべてで実施', points: 10 },
+];
+
+export const W_REHABILITATION_OPTIONS = [
+  { value: 'none', label: '再生・更生手続の適用なし', points: 0 },
+  { value: 'ongoing', label: '再生・更生手続中', points: -60 },
+];
+
+export const W_LEGAL_ACTION_OPTIONS = [
+  { value: 'none', label: '処分なし', points: 0 },
+  { value: 'instruction', label: '指示処分あり', points: -15 },
+  { value: 'suspension', label: '営業停止処分あり', points: -30 },
+];
+
+export const W_AUDIT_OPTIONS = [
+  { value: 'none', label: '監査なし', points: 0 },
+  { value: 'selfCheck', label: '経理処理の適正確認書類を提出', points: 2 },
+  { value: 'accountingAdvisor', label: '会計参与を設置', points: 10 },
+  { value: 'auditor', label: '会計監査人を設置', points: 20 },
+];
 
 export const W_ITEMS_CONFIG = [
   { key: 'socialInsurance', label: '社会保険完備',          points: 15 },
@@ -114,14 +237,14 @@ export function getMonthlyBids(staff, bidsPerStaff) {
 }
 
 // 完成工事高の2年 or 3年平均（有利な方）
-export function calcAvgRevenue(revenues) {
+export function calcAvgRevenue(revenues, method = '2year') {
   if (!revenues || revenues.length === 0) return 0;
   if (revenues.length === 1) return revenues[0];
   const n = revenues.length;
   const avg2 = (revenues[n - 2] + revenues[n - 1]) / 2;
-  if (n < 3) return avg2;
+  if (method === '2year' || n < 3) return avg2;
   const avg3 = (revenues[n - 3] + revenues[n - 2] + revenues[n - 1]) / 3;
-  return Math.max(avg2, avg3);
+  return avg3;
 }
 
 // X1点：完成工事高 → 評点（国交省告示の42区分テーブル）
@@ -357,21 +480,348 @@ export function calcYFull({
 }
 
 // Z点：技術力 → 評点（簡易計算）
-export function calcZ(level1, level2) {
-  return Math.round(Math.min(1000, 700 + level1 * 60 + level2 * 20));
+const Z1_TABLE = [
+  { min: 15500, a: 0, b: 1, c: 2335 },
+  { min: 11930, a: 62, b: 3570, c: 2065 },
+  { min: 9180, a: 63, b: 2750, c: 1998 },
+  { min: 7060, a: 62, b: 2120, c: 1939 },
+  { min: 5430, a: 62, b: 1630, c: 1876 },
+  { min: 4180, a: 63, b: 1250, c: 1808 },
+  { min: 3210, a: 63, b: 970, c: 1747 },
+  { min: 2470, a: 62, b: 740, c: 1686 },
+  { min: 1900, a: 62, b: 570, c: 1624 },
+  { min: 1460, a: 63, b: 440, c: 1558 },
+  { min: 1130, a: 63, b: 330, c: 1488 },
+  { min: 870, a: 62, b: 260, c: 1434 },
+  { min: 670, a: 63, b: 200, c: 1367 },
+  { min: 510, a: 62, b: 160, c: 1318 },
+  { min: 390, a: 63, b: 120, c: 1247 },
+  { min: 300, a: 62, b: 90, c: 1183 },
+  { min: 230, a: 63, b: 70, c: 1119 },
+  { min: 180, a: 62, b: 50, c: 1040 },
+  { min: 140, a: 62, b: 40, c: 984 },
+  { min: 110, a: 63, b: 30, c: 907 },
+  { min: 85, a: 63, b: 25, c: 860 },
+  { min: 65, a: 62, b: 20, c: 810 },
+  { min: 50, a: 62, b: 15, c: 742 },
+  { min: 40, a: 63, b: 10, c: 633 },
+  { min: 30, a: 63, b: 10, c: 633 },
+  { min: 20, a: 62, b: 10, c: 636 },
+  { min: 15, a: 63, b: 5, c: 508 },
+  { min: 10, a: 62, b: 5, c: 511 },
+  { min: 5, a: 63, b: 5, c: 509 },
+  { min: 0, a: 62, b: 5, c: 510 },
+];
+
+const Z2_TABLE = [
+  { min: 100000000, a: 0, b: 1, c: 2865 },
+  { min: 80000000, a: 119, b: 20000000, c: 2270 },
+  { min: 60000000, a: 145, b: 20000000, c: 2166 },
+  { min: 50000000, a: 87, b: 10000000, c: 2079 },
+  { min: 40000000, a: 104, b: 10000000, c: 1994 },
+  { min: 30000000, a: 126, b: 10000000, c: 1906 },
+  { min: 25000000, a: 76, b: 5000000, c: 1828 },
+  { min: 20000000, a: 90, b: 5000000, c: 1758 },
+  { min: 15000000, a: 110, b: 5000000, c: 1678 },
+  { min: 12000000, a: 81, b: 3000000, c: 1603 },
+  { min: 10000000, a: 63, b: 2000000, c: 1549 },
+  { min: 8000000, a: 75, b: 2000000, c: 1489 },
+  { min: 6000000, a: 92, b: 2000000, c: 1421 },
+  { min: 5000000, a: 55, b: 1000000, c: 1367 },
+  { min: 4000000, a: 66, b: 1000000, c: 1312 },
+  { min: 3000000, a: 79, b: 1000000, c: 1260 },
+  { min: 2500000, a: 48, b: 500000, c: 1209 },
+  { min: 2000000, a: 57, b: 500000, c: 1164 },
+  { min: 1500000, a: 70, b: 500000, c: 1112 },
+  { min: 1200000, a: 50, b: 300000, c: 1072 },
+  { min: 1000000, a: 41, b: 200000, c: 1026 },
+  { min: 800000, a: 47, b: 200000, c: 996 },
+  { min: 600000, a: 57, b: 200000, c: 956 },
+  { min: 500000, a: 36, b: 100000, c: 911 },
+  { min: 400000, a: 40, b: 100000, c: 891 },
+  { min: 300000, a: 51, b: 100000, c: 847 },
+  { min: 250000, a: 30, b: 50000, c: 820 },
+  { min: 200000, a: 35, b: 50000, c: 795 },
+  { min: 150000, a: 45, b: 50000, c: 755 },
+  { min: 120000, a: 32, b: 30000, c: 730 },
+  { min: 100000, a: 26, b: 20000, c: 702 },
+  { min: 80000, a: 29, b: 20000, c: 687 },
+  { min: 60000, a: 36, b: 20000, c: 659 },
+  { min: 50000, a: 22, b: 10000, c: 635 },
+  { min: 40000, a: 27, b: 10000, c: 610 },
+  { min: 30000, a: 31, b: 10000, c: 594 },
+  { min: 25000, a: 19, b: 5000, c: 573 },
+  { min: 20000, a: 23, b: 5000, c: 553 },
+  { min: 15000, a: 28, b: 5000, c: 533 },
+  { min: 12000, a: 19, b: 3000, c: 522 },
+  { min: 10000, a: 16, b: 2000, c: 502 },
+  { min: 0, a: 341, b: 10000, c: 241 },
+];
+
+function cloneZInput(source = DEFAULT_YEAR_DATA.zInput) {
+  const base = DEFAULT_YEAR_DATA.zInput;
+  return {
+    level1WithCertificate: source?.level1WithCertificate ?? base.level1WithCertificate,
+    level1: source?.level1 ?? base.level1,
+    kanriAssistant: source?.kanriAssistant ?? base.kanriAssistant,
+    coreSkill: source?.coreSkill ?? base.coreSkill,
+    level2: source?.level2 ?? base.level2,
+    other: source?.other ?? base.other,
+  };
+}
+
+function legacyZInput(level1 = 0, level2 = 0) {
+  return cloneZInput({
+    level1,
+    level2,
+  });
+}
+
+function calcTableScore(value, table) {
+  const normalizedValue = Math.max(0, Number(value) || 0);
+  for (const row of table) {
+    if (normalizedValue >= row.min) {
+      return Math.floor((row.a * normalizedValue) / row.b + row.c);
+    }
+  }
+  return 0;
+}
+
+function calcTechnicalValue(zInput) {
+  const normalized = cloneZInput(zInput);
+  return (
+    Math.max(0, Number(normalized.level1WithCertificate) || 0) * 6 +
+    Math.max(0, Number(normalized.level1) || 0) * 5 +
+    Math.max(0, Number(normalized.kanriAssistant) || 0) * 4 +
+    Math.max(0, Number(normalized.coreSkill) || 0) * 3 +
+    Math.max(0, Number(normalized.level2) || 0) * 2 +
+    Math.max(0, Number(normalized.other) || 0)
+  );
+}
+
+function calcZ1(technicalValue) {
+  return calcTableScore(technicalValue, Z1_TABLE);
+}
+
+function calcZ2(avgPrincipalRevenue) {
+  const revenueInThousands = Math.max(0, Number(avgPrincipalRevenue) || 0) * 10;
+  return calcTableScore(revenueInThousands, Z2_TABLE);
+}
+
+export function calcZ(inputOrLevel1, arg2 = 0, arg3 = 0) {
+  const zInput = typeof inputOrLevel1 === 'number'
+    ? legacyZInput(inputOrLevel1, arg2)
+    : cloneZInput(inputOrLevel1);
+  const avgPrincipalRevenue = typeof inputOrLevel1 === 'number'
+    ? arg3
+    : arg2;
+
+  const technicalValue = calcTechnicalValue(zInput);
+  const z1 = calcZ1(technicalValue);
+  const z2 = calcZ2(avgPrincipalRevenue);
+  const z = Math.floor(z1 * 0.8 + z2 * 0.2);
+
+  return { z, z1, z2, technicalValue };
 }
 
 // W点：社会性等
-export function calcW(items) {
-  let w = 0;
-  if (items.socialInsurance) w += 15;
-  if (items.kenkyukyo)       w += 15;
-  if (items.legalAccident)   w += 10;
-  if (items.retirementPlan)  w += 8;
-  if (items.iso9001)         w += 7;
-  if (items.iso14001)        w += 5;
-  if (items.youngWorkers)    w += 5;
-  return Math.min(100, w);
+const W_MULTIPLIER = 10 * 175 / 200;
+const W7_MACHINE_POINTS = [0, 5, 6, 7, 8, 9, 10, 11, 12, 12, 13, 13, 14, 14, 15, 15];
+const W6_RESEARCH_THRESHOLDS = [
+  { min: 1000000, points: 25 },
+  { min: 750000, points: 24 },
+  { min: 500000, points: 23 },
+  { min: 300000, points: 22 },
+  { min: 200000, points: 21 },
+  { min: 190000, points: 20 },
+  { min: 180000, points: 19 },
+  { min: 170000, points: 18 },
+  { min: 160000, points: 17 },
+  { min: 150000, points: 16 },
+  { min: 140000, points: 15 },
+  { min: 130000, points: 14 },
+  { min: 120000, points: 13 },
+  { min: 110000, points: 12 },
+  { min: 100000, points: 11 },
+  { min: 90000, points: 10 },
+  { min: 80000, points: 9 },
+  { min: 70000, points: 8 },
+  { min: 60000, points: 7 },
+  { min: 50000, points: 6 },
+  { min: 40000, points: 5 },
+  { min: 30000, points: 4 },
+  { min: 20000, points: 3 },
+  { min: 10000, points: 2 },
+  { min: 5000, points: 1 },
+];
+
+function clampFloor(value, min = 0, max = Number.POSITIVE_INFINITY) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return min;
+  return Math.max(min, Math.min(max, Math.floor(num)));
+}
+
+function getOptionPoints(options, value) {
+  const match = options.find(option => option.value === value);
+  return match ? match.points : 0;
+}
+
+function cloneWInput(source = DEFAULT_YEAR_DATA.wInput) {
+  const base = DEFAULT_YEAR_DATA.wInput;
+  return {
+    welfare: { ...base.welfare, ...(source?.welfare || {}) },
+    continuity: { ...base.continuity, ...(source?.continuity || {}) },
+    accounting: { ...base.accounting, ...(source?.accounting || {}) },
+    research: { ...base.research, ...(source?.research || {}) },
+    machinery: { ...base.machinery, ...(source?.machinery || {}) },
+    certification: { ...base.certification, ...(source?.certification || {}) },
+  };
+}
+
+function legacyWItemsToWInput(wItems = {}) {
+  const base = cloneWInput();
+  const hasKey = key => Object.prototype.hasOwnProperty.call(wItems, key);
+  return {
+    ...base,
+    welfare: {
+      ...base.welfare,
+      kentaikyo: hasKey('kenkyukyo') ? Boolean(wItems.kenkyukyo) : base.welfare.kentaikyo,
+      retirementOrPension: hasKey('retirementPlan') ? Boolean(wItems.retirementPlan) : base.welfare.retirementOrPension,
+      extraAccident: hasKey('legalAccident') ? Boolean(wItems.legalAccident) : base.welfare.extraAccident,
+      youngEngineerRatio: hasKey('youngWorkers') ? Boolean(wItems.youngWorkers) : base.welfare.youngEngineerRatio,
+    },
+    certification: {
+      ...base.certification,
+      iso9001: hasKey('iso9001') ? Boolean(wItems.iso9001) : base.certification.iso9001,
+      iso14001: hasKey('iso14001') ? Boolean(wItems.iso14001) : base.certification.iso14001,
+    },
+  };
+}
+
+function calcBusinessYearsScore(years) {
+  const fullYears = clampFloor(years);
+  if (fullYears < 6) return 0;
+  return Math.min(60, (fullYears - 5) * 2);
+}
+
+function calcAccountingProfessionalsScore(avgRevenue, cpaCount, level2AccountingCount) {
+  const accountantValue = Math.max(0, Number(cpaCount) || 0) + (Math.max(0, Number(level2AccountingCount) || 0) * 0.4);
+  const annualAvgRevenue = Math.max(0, Number(avgRevenue) || 0);
+
+  let table;
+  if (annualAvgRevenue >= 6000000) {
+    table = [
+      { min: 13.6, points: 10 },
+      { min: 10.8, points: 8 },
+      { min: 7.2, points: 6 },
+      { min: 5.2, points: 4 },
+      { min: 2.8, points: 2 },
+    ];
+  } else if (annualAvgRevenue >= 1500000) {
+    table = [
+      { min: 8.8, points: 10 },
+      { min: 6.8, points: 8 },
+      { min: 4.8, points: 6 },
+      { min: 2.8, points: 4 },
+      { min: 1.6, points: 2 },
+    ];
+  } else if (annualAvgRevenue >= 400000) {
+    table = [
+      { min: 4.4, points: 10 },
+      { min: 3.2, points: 8 },
+      { min: 2.4, points: 6 },
+      { min: 1.2, points: 4 },
+      { min: 0.8, points: 2 },
+    ];
+  } else if (annualAvgRevenue >= 100000) {
+    table = [
+      { min: 2.4, points: 10 },
+      { min: 1.6, points: 8 },
+      { min: 1.2, points: 6 },
+      { min: 0.8, points: 4 },
+      { min: 0.4, points: 2 },
+    ];
+  } else if (annualAvgRevenue >= 10000) {
+    table = [
+      { min: 1.2, points: 10 },
+      { min: 0.8, points: 8 },
+      { min: 0.4, points: 6 },
+    ];
+  } else {
+    table = [{ min: 0.4, points: 10 }];
+  }
+
+  for (const row of table) {
+    if (accountantValue >= row.min) return row.points;
+  }
+  return 0;
+}
+
+function calcResearchScore(auditStatus, amount) {
+  if (auditStatus !== 'auditor') return 0;
+  const researchAmount = Math.max(0, Number(amount) || 0);
+  for (const row of W6_RESEARCH_THRESHOLDS) {
+    if (researchAmount >= row.min) return row.points;
+  }
+  return 0;
+}
+
+function calcMachineryScore(eligibleCount) {
+  const count = clampFloor(eligibleCount, 0, 15);
+  return W7_MACHINE_POINTS[count];
+}
+
+function calcCertificationScore(certification) {
+  const has9001 = Boolean(certification?.iso9001);
+  const has14001 = Boolean(certification?.iso14001);
+  const hasEcoAction21 = Boolean(certification?.ecoAction21);
+
+  if (has9001 && has14001) return 10;
+  if (has9001 && hasEcoAction21) return 8;
+  if (has9001) return 5;
+  if (has14001) return 5;
+  if (hasEcoAction21) return 3;
+  return 0;
+}
+
+export function calcW2026(input, avgRevenue = 0) {
+  const wInput = cloneWInput(input);
+  const { welfare, continuity, accounting, research, machinery, certification } = wInput;
+
+  const w1 =
+    (welfare.kentaikyo ? 15 : 0) +
+    (welfare.retirementOrPension ? 15 : 0) +
+    (welfare.extraAccident ? 15 : 0) +
+    (welfare.youngEngineerRatio ? 1 : 0) +
+    (welfare.newYoungEngineerRatio ? 1 : 0) +
+    clampFloor(welfare.skillUpScore, 0, 10) +
+    getOptionPoints(W_WORK_LIFE_BALANCE_OPTIONS, welfare.workLifeBalance) +
+    getOptionPoints(W_CAREER_HISTORY_OPTIONS, welfare.careerHistory) +
+    (welfare.declaration ? 5 : 0);
+
+  const w2 =
+    calcBusinessYearsScore(continuity.businessYears) +
+    getOptionPoints(W_REHABILITATION_OPTIONS, continuity.rehabilitation);
+
+  const w3 = continuity.disasterSupport ? 20 : 0;
+  const w4 = getOptionPoints(W_LEGAL_ACTION_OPTIONS, continuity.legalAction);
+  const w5 =
+    getOptionPoints(W_AUDIT_OPTIONS, accounting.auditStatus) +
+    calcAccountingProfessionalsScore(avgRevenue, accounting.cpaCount, accounting.level2AccountingCount);
+  const w6 = calcResearchScore(accounting.auditStatus, research.amount);
+  const w7 = calcMachineryScore(machinery.eligibleCount);
+  const w8 = calcCertificationScore(certification);
+  const rawTotal = w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8;
+
+  return {
+    w: Math.floor(rawTotal * W_MULTIPLIER),
+    rawTotal,
+    sections: { w1, w2, w3, w4, w5, w6, w7, w8 },
+  };
+}
+
+export function calcW(input, avgRevenue = 0) {
+  return calcW2026(input, avgRevenue).w;
 }
 
 // P点 = 0.25X1 + 0.15X2 + 0.20Y + 0.25Z + 0.15W
@@ -390,22 +840,52 @@ export function getRank(p, thresholds = RANK_THRESHOLDS) {
 // 全年度のスコアを一括計算
 // 完成工事高は前年の実績を引き継いで2〜3年平均を算出
 // yModel: 'simple' = 4指標簡易版, 'full' = 8指標詳細版
-export function calcAllScores(years, yModel = 'simple') {
+// inputMode: 'auto' = 入札活動から推計, 'manual' = 完成工事高/売上を直接入力
+export function calcAllScores(years, yModel = 'simple', inputMode = 'auto') {
   const scores = [];
   const revenueHistory = [];
+  const principalRevenueHistory = [];
   const yFunc = yModel === 'full' ? calcYFull : calcY;
 
   for (const yd of years) {
     const monthlyBids = getMonthlyBids(yd.staff, yd.bidsPerStaff);
-    const rawRevenue = monthlyBids * yd.winRate * yd.avgContractAmount * 12;
+    const avgMethod = yd.avgMethod || '2year';
+    const constructionBidRatio = Math.max(0, Math.min(1, Number(yd.constructionBidRatio ?? 1)));
+    const otherWinRate = Math.max(0, Math.min(1, Number(yd.otherWinRate ?? yd.winRate ?? 0)));
+    const constructionAvgContractAmount = Math.max(0, Number(yd.constructionAvgContractAmount ?? yd.avgContractAmount ?? 0));
+    const otherAvgContractAmount = Math.max(0, Number(yd.otherAvgContractAmount ?? yd.avgContractAmount ?? 0));
+
+    let rawRevenue;   // 完成工事高（X1用）
+    let revenueForY;  // 売上（Y点用：財務指標の分母）
+    if (inputMode === 'manual') {
+      rawRevenue  = yd.kanseikoujidaka;
+      revenueForY = yd.uriage;
+    } else {
+      const constructionMonthlyBids = monthlyBids * constructionBidRatio;
+      const otherMonthlyBids = monthlyBids - constructionMonthlyBids;
+      const estimatedConstructionRevenue = constructionMonthlyBids * yd.winRate * constructionAvgContractAmount * 12;
+      const estimatedOtherSales = otherMonthlyBids * otherWinRate * otherAvgContractAmount * 12;
+      rawRevenue  = estimatedConstructionRevenue;
+      revenueForY = estimatedConstructionRevenue + estimatedOtherSales;
+    }
+
+    const principalRevenue = inputMode === 'manual'
+      ? Math.max(0, Number(yd.motoukeKoujidaka) || 0)
+      : (
+          yd.motoukeSameAsKansei === false
+            ? Math.max(0, Number(yd.motoukeKoujidaka) || 0)
+            : rawRevenue
+        );
 
     const all = [...revenueHistory, rawRevenue];
-    const avgRevenue = calcAvgRevenue(all.slice(-3));
+    const principalAll = [...principalRevenueHistory, principalRevenue];
+    const avgRevenue = calcAvgRevenue(all.slice(-3), avgMethod);
+    const avgPrincipalRevenue = calcAvgRevenue(principalAll.slice(-3), avgMethod);
 
     const x1 = calcX1(avgRevenue);
     const x2 = calcX2(yd.equity, yd.avgProfit);
     const y = yFunc({
-      revenue: rawRevenue,
+      revenue: revenueForY,
       profitRate: yd.profitRate,
       equity: yd.equity,
       debt: yd.debt,
@@ -415,18 +895,28 @@ export function calcAllScores(years, yModel = 'simple') {
       operatingCF: yd.operatingCF,
       retainedEarnings: yd.retainedEarnings,
     });
-    const z = calcZ(yd.level1, yd.level2);
-    const w = calcW(yd.wItems);
+    const zInput = yd.zInput ? cloneZInput(yd.zInput) : legacyZInput(yd.level1, yd.level2);
+    const zDetail = calcZ(zInput, avgPrincipalRevenue);
+    const z = zDetail.z;
+    const wInput = yd.wInput ? cloneWInput(yd.wInput) : legacyWItemsToWInput(yd.wItems);
+    const wDetail = calcW2026(wInput, avgRevenue);
+    const w = wDetail.w;
     const p = calcP(x1, x2, y, z, w);
 
     scores.push({
       rawRevenue,
       avgRevenue,
+      principalRevenue,
+      avgPrincipalRevenue,
+      revenueForY,
       x1, x2, y, z, w, p,
+      zDetail,
+      wDetail,
       rank: getRank(p),
       monthlyBids,
     });
     revenueHistory.push(rawRevenue);
+    principalRevenueHistory.push(principalRevenue);
   }
   return scores;
 }
@@ -435,6 +925,8 @@ export function calcAllScores(years, yModel = 'simple') {
 export function createDefaultYears(n) {
   return Array.from({ length: n + 1 }, () => ({
     ...DEFAULT_YEAR_DATA,
+    zInput: cloneZInput(),
     wItems: { ...DEFAULT_YEAR_DATA.wItems },
+    wInput: cloneWInput(),
   }));
 }

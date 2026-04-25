@@ -10,7 +10,7 @@ export const DEFAULT_YEAR_DATA = {
   otherAvgContractAmount: 400, // 役務・物販の平均落札金額（万円）
   profitRate: 0.06,       // 経常利益率
   equity: 3000,           // 自己資本（万円）
-  debt: 4000,             // 借入金残高（万円）
+  debt: 4000,             // 負債総額（万円）= 流動負債＋固定負債
   interest: 80,           // 支払利息（万円/年）
   avgProfit: 300,         // 平均利益（万円/年）
   // --- 詳細版(8指標)用の追加入力 ---
@@ -23,7 +23,7 @@ export const DEFAULT_YEAR_DATA = {
   uriage: 10000,          // 売上高（万円/年）
   motoukeSameAsKansei: true,
   motoukeKoujidaka: 10000, // 元請完成工事高（万円/年）
-  avgMethod: '2year',
+  avgMethod: '3year',
   industry: '土木一式',
   // ---
   level1: 0,              // 1級技術者数（旧互換）
@@ -44,6 +44,44 @@ export const DEFAULT_YEAR_DATA = {
     iso9001: false,
     iso14001: false,
     youngWorkers: false,
+  },
+  wOverride: {
+    enabled: false,
+    value: 0,
+  },
+  // 経審準拠の3年平均値オーバーライド（万円）
+  // X1点・Z2点用に直接「3年平均完成工事高」「3年平均元請完成工事高」を指定
+  avgRevenueOverride: {
+    enabled: false,
+    completionRevenue: 0,   // 3年平均完成工事高（万円）→ X1
+    principalRevenue: 0,    // 3年平均元請完成工事高（万円）→ Z2
+  },
+  financialDoc: {
+    unit: 'man',
+    sales: '',
+    grossProfit: '',
+    ordinaryProfit: '',
+    operatingProfit: '',
+    depreciation: '',
+    interest: '',
+    corporateTax: '',
+    netAssets: '',
+    totalDebt: '',
+    fixedAssets: '',
+    retainedEarnings: '',
+    operatingCF: '',
+    cfAuto: false,
+    // 2期平均オプション（任意）
+    netAssetsPrior: '',
+    netAssetsUseDirect: false,
+    netAssetsAvgDirect: '',
+    operatingProfitPrior: '',
+    depreciationPrior: '',
+    avgProfitUseDirect: false,
+    avgProfitDirect: '',
+    operatingCFPrior: '',
+    operatingCFUseDirect: false,
+    operatingCFAvgDirect: '',
   },
   wInput: {
     welfare: {
@@ -137,7 +175,7 @@ export const SLIDER_CONFIGS = {
     min: 500, max: 50000, step: 500, unit: '万円',
   },
   debt: {
-    label: '借入金残高',
+    label: '負債総額（流動＋固定）',
     min: 0, max: 50000, step: 500, unit: '万円',
   },
   interest: {
@@ -236,7 +274,7 @@ export function getMonthlyBids(staff, bidsPerStaff) {
   return Math.round(staff * bidsPerStaff);
 }
 
-// 完成工事高の2年 or 3年平均（有利な方）
+// 完成工事高の2年または3年平均（method='2year'|'3year' で切替）
 export function calcAvgRevenue(revenues, method = '2year') {
   if (!revenues || revenues.length === 0) return 0;
   if (revenues.length === 1) return revenues[0];
@@ -879,8 +917,16 @@ export function calcAllScores(years, yModel = 'simple', inputMode = 'auto') {
 
     const all = [...revenueHistory, rawRevenue];
     const principalAll = [...principalRevenueHistory, principalRevenue];
-    const avgRevenue = calcAvgRevenue(all.slice(-3), avgMethod);
-    const avgPrincipalRevenue = calcAvgRevenue(principalAll.slice(-3), avgMethod);
+    const avgOverride = yd.avgRevenueOverride;
+    const useAvgOverride = Boolean(avgOverride?.enabled);
+    const overrideCompletion = Math.max(0, Number(avgOverride?.completionRevenue) || 0);
+    const overridePrincipal = Math.max(0, Number(avgOverride?.principalRevenue) || 0);
+    const avgRevenue = useAvgOverride && overrideCompletion > 0
+      ? overrideCompletion
+      : calcAvgRevenue(all.slice(-3), avgMethod);
+    const avgPrincipalRevenue = useAvgOverride && overridePrincipal > 0
+      ? overridePrincipal
+      : calcAvgRevenue(principalAll.slice(-3), avgMethod);
 
     const x1 = calcX1(avgRevenue);
     const x2 = calcX2(yd.equity, yd.avgProfit);
@@ -900,7 +946,9 @@ export function calcAllScores(years, yModel = 'simple', inputMode = 'auto') {
     const z = zDetail.z;
     const wInput = yd.wInput ? cloneWInput(yd.wInput) : legacyWItemsToWInput(yd.wItems);
     const wDetail = calcW2026(wInput, avgRevenue);
-    const w = wDetail.w;
+    const wOverrideEnabled = Boolean(yd.wOverride?.enabled);
+    const wOverrideValue = Math.max(0, Math.floor(Number(yd.wOverride?.value) || 0));
+    const w = wOverrideEnabled ? wOverrideValue : wDetail.w;
     const p = calcP(x1, x2, y, z, w);
 
     scores.push({
@@ -928,5 +976,8 @@ export function createDefaultYears(n) {
     zInput: cloneZInput(),
     wItems: { ...DEFAULT_YEAR_DATA.wItems },
     wInput: cloneWInput(),
+    wOverride: { ...DEFAULT_YEAR_DATA.wOverride },
+    avgRevenueOverride: { ...DEFAULT_YEAR_DATA.avgRevenueOverride },
+    financialDoc: { ...DEFAULT_YEAR_DATA.financialDoc },
   }));
 }

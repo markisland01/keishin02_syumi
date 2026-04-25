@@ -130,6 +130,9 @@ function cloneFutureYear(baseYear, yearOffset = 0) {
     zInput: cloneZInput(baseYear.zInput),
     wItems: { ...baseYear.wItems },
     wInput: nextWInput,
+    wOverride: { ...(baseYear.wOverride || { enabled: false, value: 0 }) },
+    avgRevenueOverride: { ...(baseYear.avgRevenueOverride || { enabled: false, completionRevenue: 0, principalRevenue: 0 }) },
+    financialDoc: { ...(baseYear.financialDoc || {}) },
   };
 }
 
@@ -174,7 +177,7 @@ export default function App() {
   const [years, setYears] = useState(() => createDefaultYears(2));
   const [revenueGrowthRate, setRevenueGrowthRate] = useState(1.0);
   const [yModel, setYModel] = useState('simple');
-  const [inputMode, setInputMode] = useState('auto');
+  const [inputMode, setInputMode] = useState('manual');
 
   const scores = useMemo(
     () => calcAllScores(years, yModel, inputMode),
@@ -284,6 +287,59 @@ export default function App() {
         return {
           ...y,
           wInput: applyWInputValue(y.wInput, path, value, i - yearIdx),
+        };
+      })
+    );
+  }
+
+  function handleFinancialDocChange(yearIdx, partial) {
+    setYears(prev =>
+      prev.map((y, i) => (
+        i === yearIdx
+          ? { ...y, financialDoc: { ...(y.financialDoc || {}), ...partial } }
+          : y
+      ))
+    );
+  }
+
+  function handleMultiSliderChange(yearIdx, updates) {
+    setYears(prev => prev.map((y, i) => (i === yearIdx ? { ...y, ...updates } : y)));
+  }
+
+  function handlePropagateCurrent() {
+    if (years.length <= 1) return;
+    const ok = window.confirm(
+      '「現在」のデータ（経審オーバーライド・決算書・技術職員数・W点など）を、すべての翌年以降にコピーします。\n\n各年ですでに入力した内容は上書きされます。よろしいですか？'
+    );
+    if (!ok) return;
+    setYears(prev => {
+      const base = prev[0];
+      const next = prev.map((y, i) => (i === 0 ? y : cloneFutureYear(base, i)));
+      return revenueGrowthRate !== 1.0 ? applyGrowthRate(revenueGrowthRate, next) : next;
+    });
+  }
+
+  function handleAvgRevenueOverrideChange(yearIdx, partial) {
+    setYears(prev =>
+      prev.map((y, i) => {
+        if (i !== yearIdx) return y;
+        const current = y.avgRevenueOverride || { enabled: false, completionRevenue: 0, principalRevenue: 0 };
+        return {
+          ...y,
+          avgRevenueOverride: { ...current, ...partial },
+        };
+      })
+    );
+  }
+
+  function handleWOverrideChange(yearIdx, partial) {
+    setYears(prev =>
+      prev.map((y, i) => {
+        if (i < yearIdx) return y;
+        const current = y.wOverride || { enabled: false, value: 0 };
+        return {
+          ...y,
+          wOverride: { ...current, ...partial },
         };
       })
     );
@@ -475,7 +531,7 @@ export default function App() {
               onChange={() => setYModel('simple')}
               style={{ margin: 0 }}
             />
-            簡易（4指標）
+            簡易・近似（4指標）
           </label>
           <label
             style={{
@@ -499,12 +555,12 @@ export default function App() {
               onChange={() => setYModel('full')}
               style={{ margin: 0 }}
             />
-            詳細（実経審8指標）
+            詳細・公式式（実経審8指標）
           </label>
           <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>
             {yModel === 'simple'
-              ? '※ 自己資本比率・利益率・利息比率・負債回転期間の4指標'
-              : '※ 実経審8指標に近い形で計算します。'}
+              ? '※ 4指標による独自近似式（公式式ではありません）。経審を再現するなら「詳細」推奨。'
+              : '※ 国交省告示の公式式 Y = 167.3 × A + 583（実経審8指標）で計算します。'}
           </span>
         </div>
 
@@ -529,30 +585,6 @@ export default function App() {
               gap: 4,
               padding: '4px 10px',
               borderRadius: 6,
-              background: inputMode === 'auto' ? '#3949ab' : 'white',
-              color: inputMode === 'auto' ? 'white' : '#555',
-              border: '1px solid #9fa8da',
-            }}
-          >
-            <input
-              type="radio"
-              name="inputMode"
-              value="auto"
-              checked={inputMode === 'auto'}
-              onChange={() => handleInputModeChange('auto')}
-              style={{ margin: 0 }}
-            />
-            自動（入札活動から推計）
-          </label>
-          <label
-            style={{
-              fontSize: 12,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '4px 10px',
-              borderRadius: 6,
               background: inputMode === 'manual' ? '#3949ab' : 'white',
               color: inputMode === 'manual' ? 'white' : '#555',
               border: '1px solid #9fa8da',
@@ -567,6 +599,30 @@ export default function App() {
               style={{ margin: 0 }}
             />
             手動（完成工事高・売上を直接入力）
+          </label>
+          <label
+            style={{
+              fontSize: 12,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 10px',
+              borderRadius: 6,
+              background: inputMode === 'auto' ? '#3949ab' : 'white',
+              color: inputMode === 'auto' ? 'white' : '#555',
+              border: '1px solid #9fa8da',
+            }}
+          >
+            <input
+              type="radio"
+              name="inputMode"
+              value="auto"
+              checked={inputMode === 'auto'}
+              onChange={() => handleInputModeChange('auto')}
+              style={{ margin: 0 }}
+            />
+            自動（入札活動から推計）
           </label>
           <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>
             {inputMode === 'auto'
@@ -619,6 +675,40 @@ export default function App() {
 
       <PScoreChart scores={scores} n={n} targetRank={targetRank} targetP={targetP} />
 
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: 6,
+          padding: '0 4px',
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ fontSize: 11, color: '#666' }}>
+          年別シミュレーション（経審を再現後、翌年以降にコピーすると編集の起点になります）
+        </span>
+        <button
+          type="button"
+          onClick={handlePropagateCurrent}
+          disabled={years.length <= 1}
+          style={{
+            padding: '6px 14px',
+            fontSize: 11,
+            fontWeight: 'bold',
+            color: years.length <= 1 ? '#999' : 'white',
+            background: years.length <= 1 ? '#e0e0e0' : '#3949ab',
+            border: 'none',
+            borderRadius: 6,
+            cursor: years.length <= 1 ? 'not-allowed' : 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          ▶ 現在の入力を翌年以降にコピー
+        </button>
+      </div>
+
       <div style={{ display: 'flex', gap: 4, marginBottom: 0 }}>
         {scores.map((s, i) => (
           <button
@@ -665,6 +755,10 @@ export default function App() {
           onSliderChange={(key, val) => handleSliderChange(activeYear, key, val)}
           onZInputChange={(key, val) => handleZInputChange(activeYear, key, val)}
           onWInputChange={(path, val) => handleWInputChange(activeYear, path, val)}
+          onWOverrideChange={partial => handleWOverrideChange(activeYear, partial)}
+          onAvgRevenueOverrideChange={partial => handleAvgRevenueOverrideChange(activeYear, partial)}
+          onFinancialDocChange={partial => handleFinancialDocChange(activeYear, partial)}
+          onMultiSliderChange={updates => handleMultiSliderChange(activeYear, updates)}
         />
       </div>
 

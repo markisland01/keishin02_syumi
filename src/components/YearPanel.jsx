@@ -19,7 +19,7 @@ const SLIDER_UI = {
   avgContractAmount: { label: '平均落札金額', unit: '万円' },
   profitRate: { label: '利益率', unit: '%' },
   equity: { label: '自己資本', unit: '万円' },
-  debt: { label: '負債総額', unit: '万円' },
+  debt: { label: '負債総額（流動＋固定）', unit: '万円' },
   interest: { label: '支払利息', unit: '万円/年' },
   grossProfitRate: { label: '売上総利益率', unit: '%' },
   fixedAssets: { label: '固定資産', unit: '万円' },
@@ -259,6 +259,458 @@ function ModeToggle({ value, onChange }) {
   );
 }
 
+const UNIT_OPTIONS = [
+  { value: 'man', label: '万円' },
+  { value: 'sen', label: '千円' },
+  { value: 'en', label: '円' },
+];
+
+function unitFactorToMan(unit) {
+  if (unit === 'en') return 1 / 10000;
+  if (unit === 'sen') return 1 / 10;
+  return 1;
+}
+
+function parseNum(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function DocInput({ label, value, onChange, hint, dim, disabled, displayValue }) {
+  return (
+    <label style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 6, padding: '4px 0', borderTop: '1px dashed #e0e0e0' }}>
+      <span style={{ fontSize: 11, color: dim || disabled ? '#999' : '#444' }}>
+        {label}
+        {hint && <span style={{ fontSize: 10, color: '#999', marginLeft: 4 }}>{hint}</span>}
+      </span>
+      <input
+        type="number"
+        value={disabled ? (displayValue ?? '') : (value ?? '')}
+        onChange={e => onChange?.(e.target.value)}
+        disabled={disabled}
+        placeholder="—"
+        style={{
+          width: 110,
+          padding: '4px 6px',
+          fontSize: 12,
+          textAlign: 'right',
+          border: '1px solid #c8e6c9',
+          borderRadius: 4,
+          background: disabled ? '#f0f0f0' : 'white',
+          color: disabled ? '#666' : 'inherit',
+        }}
+      />
+    </label>
+  );
+}
+
+function TwoPeriodCard({
+  title,
+  accent = '#00695C',
+  currentMan,
+  useDirect,
+  onUseDirectChange,
+  priorRaw,
+  onPriorChange,
+  directRaw,
+  onDirectChange,
+  resultMan,
+  resultSource,
+  priorPlaceholder,
+  customPriorInputs,
+}) {
+  const fmt = v => (v === null || v === undefined ? '—' : Math.round(v).toLocaleString() + ' 万円');
+  return (
+    <div style={{ background: 'white', borderRadius: 6, padding: '8px 12px', borderLeft: `3px solid ${accent}` }}>
+      <div style={{ fontSize: 11, fontWeight: 'bold', color: accent, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 10, color: '#666', marginBottom: 6 }}>
+        当期: <strong>{fmt(currentMan)}</strong>
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, padding: '4px 0', cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={useDirect}
+          onChange={e => onUseDirectChange?.(e.target.checked)}
+        />
+        <span style={{ color: useDirect ? accent : '#444', fontWeight: useDirect ? 'bold' : 'normal' }}>
+          2期平均値を直接入力
+        </span>
+      </label>
+      {useDirect ? (
+        <DocInput
+          label="2期平均値"
+          value={directRaw}
+          onChange={onDirectChange}
+        />
+      ) : (
+        customPriorInputs || (
+          <DocInput
+            label={priorPlaceholder || '前期'}
+            value={priorRaw}
+            onChange={onPriorChange}
+            hint="空欄なら当期のみ使用"
+          />
+        )
+      )}
+      <div
+        style={{
+          marginTop: 6,
+          padding: '4px 8px',
+          background: '#fafafa',
+          borderRadius: 4,
+          fontSize: 11,
+          color: resultSource ? accent : '#999',
+          fontWeight: 'bold',
+        }}
+      >
+        → 採用値: {fmt(resultMan)}{resultSource ? `（${resultSource}）` : ''}
+      </div>
+    </div>
+  );
+}
+
+function FinancialDocPanel({ doc = {}, onDocChange, onApply, yModel = 'simple' }) {
+  const unit = doc.unit || 'man';
+  const factor = unitFactorToMan(unit);
+  const toMan = key => {
+    const n = parseNum(doc[key]);
+    return n === null ? null : n * factor;
+  };
+
+  const sales = toMan('sales');
+  const ordinaryProfit = toMan('ordinaryProfit');
+  const grossProfit = toMan('grossProfit');
+  const operatingProfit = toMan('operatingProfit');
+  const depreciation = toMan('depreciation');
+  const interest = toMan('interest');
+  const corporateTax = toMan('corporateTax');
+  const netAssets = toMan('netAssets');
+  const totalDebt = toMan('totalDebt');
+  const fixedAssets = toMan('fixedAssets');
+  const retainedEarnings = toMan('retainedEarnings');
+
+  const cfAuto = Boolean(doc.cfAuto);
+  const operatingCFManual = toMan('operatingCF');
+  const operatingCFAuto = ordinaryProfit !== null
+    ? ordinaryProfit + (depreciation || 0) - (corporateTax || 0)
+    : null;
+  const operatingCF = cfAuto ? operatingCFAuto : operatingCFManual;
+
+  // 2期平均オプション ──────────────────────────
+  const currentAvgProfit = operatingProfit !== null
+    ? operatingProfit + (depreciation || 0)
+    : null;
+
+  // 自己資本
+  const netAssetsPrior = toMan('netAssetsPrior');
+  const useEquityDirect = Boolean(doc.netAssetsUseDirect);
+  const equityDirect = toMan('netAssetsAvgDirect');
+  let equityResult, equitySource;
+  if (useEquityDirect) {
+    equityResult = equityDirect;
+    equitySource = '平均値を直接入力';
+  } else if (netAssetsPrior !== null && netAssets !== null) {
+    equityResult = (netAssets + netAssetsPrior) / 2;
+    equitySource = '2期平均';
+  } else {
+    equityResult = netAssets;
+    equitySource = netAssets !== null ? '当期のみ' : null;
+  }
+
+  // 平均利益額
+  const operatingProfitPrior = toMan('operatingProfitPrior');
+  const depreciationPrior = toMan('depreciationPrior');
+  const priorAvgProfit = (operatingProfitPrior !== null || depreciationPrior !== null)
+    ? (operatingProfitPrior || 0) + (depreciationPrior || 0)
+    : null;
+  const useAvgProfitDirect = Boolean(doc.avgProfitUseDirect);
+  const avgProfitDirect = toMan('avgProfitDirect');
+  let avgProfitResult, avgProfitSource;
+  if (useAvgProfitDirect) {
+    avgProfitResult = avgProfitDirect;
+    avgProfitSource = '平均値を直接入力';
+  } else if (priorAvgProfit !== null && currentAvgProfit !== null) {
+    avgProfitResult = (currentAvgProfit + priorAvgProfit) / 2;
+    avgProfitSource = '2期平均';
+  } else {
+    avgProfitResult = currentAvgProfit;
+    avgProfitSource = currentAvgProfit !== null ? '当期のみ' : null;
+  }
+
+  // 営業CF
+  const operatingCFPrior = toMan('operatingCFPrior');
+  const useCFDirect = Boolean(doc.operatingCFUseDirect);
+  const cfDirect = toMan('operatingCFAvgDirect');
+  let cfResult, cfSource;
+  if (useCFDirect) {
+    cfResult = cfDirect;
+    cfSource = '平均値を直接入力';
+  } else if (operatingCFPrior !== null && operatingCF !== null) {
+    cfResult = (operatingCF + operatingCFPrior) / 2;
+    cfSource = '2期平均';
+  } else {
+    cfResult = operatingCF;
+    cfSource = operatingCF !== null ? '当期のみ' : null;
+  }
+
+  const profitRate = sales && sales > 0 && ordinaryProfit !== null ? ordinaryProfit / sales : null;
+  const grossProfitRate = sales && sales > 0 && grossProfit !== null ? grossProfit / sales : null;
+  const avgProfit = operatingProfit !== null
+    ? operatingProfit + (depreciation || 0)
+    : null;
+
+  const updates = {};
+  if (profitRate !== null) updates.profitRate = Math.round(profitRate * 10000) / 10000;
+  if (grossProfitRate !== null) updates.grossProfitRate = Math.round(grossProfitRate * 10000) / 10000;
+  if (equityResult !== null) updates.equity = Math.round(equityResult);
+  if (totalDebt !== null) updates.debt = Math.round(totalDebt);
+  if (fixedAssets !== null) updates.fixedAssets = Math.round(fixedAssets);
+  if (retainedEarnings !== null) updates.retainedEarnings = Math.round(retainedEarnings);
+  if (interest !== null) updates.interest = Math.round(interest);
+  if (cfResult !== null) updates.operatingCF = Math.round(cfResult);
+  if (avgProfitResult !== null) updates.avgProfit = Math.round(avgProfitResult);
+
+  const hasUpdates = Object.keys(updates).length > 0;
+
+  const fmt = v => (v === null || v === undefined ? '—' : Math.round(v).toLocaleString() + ' 万円');
+  const fmtPct = v => (v === null || v === undefined ? '—' : (v * 100).toFixed(2) + ' %');
+
+  function handleClear() {
+    onDocChange?.({
+      sales: '', grossProfit: '', ordinaryProfit: '', operatingProfit: '',
+      depreciation: '', interest: '', corporateTax: '', netAssets: '', totalDebt: '',
+      fixedAssets: '', retainedEarnings: '', operatingCF: '',
+      netAssetsPrior: '', netAssetsAvgDirect: '',
+      operatingProfitPrior: '', depreciationPrior: '', avgProfitDirect: '',
+      operatingCFPrior: '', operatingCFAvgDirect: '',
+    });
+  }
+
+  return (
+    <details style={{ marginBottom: 12, border: '1px solid #c8e6c9', borderRadius: 8, background: '#f1f8e9' }}>
+      <summary style={{ cursor: 'pointer', padding: '10px 12px', fontSize: 12, fontWeight: 'bold', color: '#2E7D32', listStyle: 'none' }}>
+        ▸ 決算書から入力（円・千円・万円対応）
+      </summary>
+      <div style={{ padding: '4px 14px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 11, color: '#555', fontWeight: 'bold' }}>入力単位</span>
+          {UNIT_OPTIONS.map(opt => (
+            <label
+              key={opt.value}
+              style={{
+                fontSize: 12,
+                cursor: 'pointer',
+                padding: '3px 10px',
+                borderRadius: 5,
+                background: unit === opt.value ? '#2E7D32' : 'white',
+                color: unit === opt.value ? 'white' : '#555',
+                border: '1px solid #c8e6c9',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+              }}
+            >
+              <input
+                type="radio"
+                name="financialDocUnit"
+                value={opt.value}
+                checked={unit === opt.value}
+                onChange={() => onDocChange?.({ unit: opt.value })}
+                style={{ margin: 0 }}
+              />
+              {opt.label}
+            </label>
+          ))}
+          <span style={{ fontSize: 10, color: '#888', marginLeft: 'auto' }}>
+            内部は万円単位で扱います。
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14 }}>
+          <div style={{ background: 'white', borderRadius: 6, padding: '8px 12px' }}>
+            <div style={{ fontSize: 11, fontWeight: 'bold', color: '#1565C0', marginBottom: 4 }}>損益計算書 (PL)</div>
+            <DocInput label="売上高" value={doc.sales} onChange={v => onDocChange?.({ sales: v })} />
+            <DocInput label="売上総利益" value={doc.grossProfit} onChange={v => onDocChange?.({ grossProfit: v })} hint={yModel === 'simple' ? '※詳細モデルで使用' : ''} dim={yModel === 'simple'} />
+            <DocInput label="経常利益" value={doc.ordinaryProfit} onChange={v => onDocChange?.({ ordinaryProfit: v })} />
+            <DocInput label="営業利益" value={doc.operatingProfit} onChange={v => onDocChange?.({ operatingProfit: v })} hint="平均利益額に使用" />
+            <DocInput label="減価償却実施額" value={doc.depreciation} onChange={v => onDocChange?.({ depreciation: v })} hint="平均利益額に使用" />
+            <DocInput label="支払利息" value={doc.interest} onChange={v => onDocChange?.({ interest: v })} />
+            <DocInput label="法人税等" value={doc.corporateTax} onChange={v => onDocChange?.({ corporateTax: v })} hint="CF自動計算に使用" />
+          </div>
+
+          <div style={{ background: 'white', borderRadius: 6, padding: '8px 12px' }}>
+            <div style={{ fontSize: 11, fontWeight: 'bold', color: '#6A1B9A', marginBottom: 4 }}>貸借対照表 (BS)</div>
+            <DocInput label="純資産合計" value={doc.netAssets} onChange={v => onDocChange?.({ netAssets: v })} hint="→ 自己資本" />
+            <DocInput label="負債合計" value={doc.totalDebt} onChange={v => onDocChange?.({ totalDebt: v })} hint="→ 負債総額" />
+            <DocInput label="固定資産合計" value={doc.fixedAssets} onChange={v => onDocChange?.({ fixedAssets: v })} hint={yModel === 'simple' ? '※詳細モデルで使用' : ''} dim={yModel === 'simple'} />
+            <DocInput label="利益剰余金" value={doc.retainedEarnings} onChange={v => onDocChange?.({ retainedEarnings: v })} hint={yModel === 'simple' ? '※詳細モデルで使用' : ''} dim={yModel === 'simple'} />
+          </div>
+
+          <div style={{ background: 'white', borderRadius: 6, padding: '8px 12px' }}>
+            <div style={{ fontSize: 11, fontWeight: 'bold', color: '#E65100', marginBottom: 4 }}>キャッシュフロー (CF)</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, padding: '4px 0', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={cfAuto}
+                onChange={e => onDocChange?.({ cfAuto: e.target.checked })}
+              />
+              <span style={{ color: cfAuto ? '#E65100' : '#444', fontWeight: cfAuto ? 'bold' : 'normal' }}>
+                CF計算書がない（PLから自動計算）
+              </span>
+            </label>
+            <DocInput
+              label="営業キャッシュフロー"
+              value={doc.operatingCF}
+              onChange={v => onDocChange?.({ operatingCF: v })}
+              hint={yModel === 'simple' ? '※詳細モデルで使用' : ''}
+              dim={yModel === 'simple'}
+              disabled={cfAuto}
+              displayValue={cfAuto && operatingCFAuto !== null ? Math.round(operatingCFAuto / factor) : ''}
+            />
+            <div style={{ fontSize: 10, color: '#888', marginTop: 6, lineHeight: 1.5 }}>
+              {cfAuto
+                ? '営業CF ≒ 経常利益 ＋ 減価償却実施額 − 法人税等（簡易式）'
+                : 'CF計算書がない場合は、上のチェックを入れるとPLから自動計算します。'}
+            </div>
+          </div>
+        </div>
+
+        <details style={{ marginTop: 12, border: '1px dashed #80cbc4', borderRadius: 6, background: '#e0f2f1' }}>
+          <summary style={{ cursor: 'pointer', padding: '8px 12px', fontSize: 11, fontWeight: 'bold', color: '#00695C', listStyle: 'none' }}>
+            ▸ 2期平均オプション（任意・精度向上）
+          </summary>
+          <div style={{ padding: '4px 12px 12px' }}>
+            <div style={{ fontSize: 10, color: '#555', marginBottom: 8, lineHeight: 1.6 }}>
+              経審のY点・X2点は本来「2期平均」で評価されます。前期データがあれば下に入力してください。
+              入力単位は上で選択した単位（{UNIT_OPTIONS.find(o => o.value === unit)?.label}）と同じです。
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 10 }}>
+
+              <TwoPeriodCard
+                title="自己資本（純資産）"
+                accent="#6A1B9A"
+                currentMan={netAssets}
+                useDirect={useEquityDirect}
+                onUseDirectChange={v => onDocChange?.({ netAssetsUseDirect: v })}
+                priorRaw={doc.netAssetsPrior}
+                onPriorChange={v => onDocChange?.({ netAssetsPrior: v })}
+                directRaw={doc.netAssetsAvgDirect}
+                onDirectChange={v => onDocChange?.({ netAssetsAvgDirect: v })}
+                resultMan={equityResult}
+                resultSource={equitySource}
+                priorPlaceholder="前期 純資産合計"
+              />
+
+              <TwoPeriodCard
+                title="平均利益額（営業利益＋減価償却）"
+                accent="#1565C0"
+                currentMan={currentAvgProfit}
+                useDirect={useAvgProfitDirect}
+                onUseDirectChange={v => onDocChange?.({ avgProfitUseDirect: v })}
+                directRaw={doc.avgProfitDirect}
+                onDirectChange={v => onDocChange?.({ avgProfitDirect: v })}
+                resultMan={avgProfitResult}
+                resultSource={avgProfitSource}
+                customPriorInputs={(
+                  <>
+                    <DocInput
+                      label="前期 営業利益"
+                      value={doc.operatingProfitPrior}
+                      onChange={v => onDocChange?.({ operatingProfitPrior: v })}
+                    />
+                    <DocInput
+                      label="前期 減価償却実施額"
+                      value={doc.depreciationPrior}
+                      onChange={v => onDocChange?.({ depreciationPrior: v })}
+                    />
+                  </>
+                )}
+              />
+
+              <TwoPeriodCard
+                title="営業キャッシュフロー"
+                accent="#E65100"
+                currentMan={operatingCF}
+                useDirect={useCFDirect}
+                onUseDirectChange={v => onDocChange?.({ operatingCFUseDirect: v })}
+                priorRaw={doc.operatingCFPrior}
+                onPriorChange={v => onDocChange?.({ operatingCFPrior: v })}
+                directRaw={doc.operatingCFAvgDirect}
+                onDirectChange={v => onDocChange?.({ operatingCFAvgDirect: v })}
+                resultMan={cfResult}
+                resultSource={cfSource}
+                priorPlaceholder="前期 営業CF"
+              />
+            </div>
+          </div>
+        </details>
+
+        <div
+          style={{
+            marginTop: 12,
+            padding: '10px 12px',
+            background: '#fffde7',
+            border: '1px dashed #fbc02d',
+            borderRadius: 6,
+            fontSize: 11,
+            lineHeight: 1.7,
+            color: '#5d4037',
+          }}
+        >
+          <div style={{ fontWeight: 'bold', marginBottom: 4 }}>変換結果プレビュー</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 4 }}>
+            <span>経常利益率: {fmtPct(profitRate)}</span>
+            <span>売上総利益率: {fmtPct(grossProfitRate)}</span>
+            <span>自己資本: {fmt(equityResult)}{equitySource ? `（${equitySource}）` : ''}</span>
+            <span>負債総額: {fmt(totalDebt)}</span>
+            <span>固定資産: {fmt(fixedAssets)}</span>
+            <span>利益剰余金: {fmt(retainedEarnings)}</span>
+            <span>支払利息: {fmt(interest)}</span>
+            <span>営業CF: {fmt(cfResult)}{cfSource ? `（${cfSource}）` : ''}</span>
+            <span>平均利益額: {fmt(avgProfitResult)}{avgProfitSource ? `（${avgProfitSource}）` : ''}</span>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => onApply?.(updates)}
+            disabled={!hasUpdates}
+            style={{
+              padding: '8px 16px',
+              fontSize: 12,
+              fontWeight: 'bold',
+              color: hasUpdates ? 'white' : '#999',
+              background: hasUpdates ? '#2E7D32' : '#e0e0e0',
+              border: 'none',
+              borderRadius: 6,
+              cursor: hasUpdates ? 'pointer' : 'not-allowed',
+            }}
+          >
+            この内容で財務スライダーを更新
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            style={{
+              padding: '8px 14px',
+              fontSize: 12,
+              color: '#666',
+              background: 'white',
+              border: '1px solid #ccc',
+              borderRadius: 6,
+              cursor: 'pointer',
+            }}
+          >
+            入力をクリア
+          </button>
+        </div>
+      </div>
+    </details>
+  );
+}
+
 function SectionCard({ title, children, accentColor = '#1a237e' }) {
   return (
     <div
@@ -482,6 +934,10 @@ export default function YearPanel({
   onSliderChange,
   onZInputChange,
   onWInputChange,
+  onWOverrideChange,
+  onAvgRevenueOverrideChange,
+  onFinancialDocChange,
+  onMultiSliderChange,
 }) {
   const [inputUiMode, setInputUiMode] = useState('simple');
   const monthlyBids = getMonthlyBids(yearData.staff, yearData.bidsPerStaff);
@@ -523,6 +979,10 @@ export default function YearPanel({
   const research = wInput.research || {};
   const machinery = wInput.machinery || {};
   const certification = wInput.certification || {};
+  const wOverride = yearData.wOverride || { enabled: false, value: 0 };
+  const wOverrideEnabled = Boolean(wOverride.enabled);
+  const avgRevenueOverride = yearData.avgRevenueOverride || { enabled: false, completionRevenue: 0, principalRevenue: 0 };
+  const avgRevenueOverrideEnabled = Boolean(avgRevenueOverride.enabled);
   const wDetail = score.wDetail || { rawTotal: 0, sections: {} };
   const wSections = wDetail.sections || {};
   const wProgress = Math.max(0, Math.min(100, (Math.max(0, wDetail.rawTotal) / 237) * 100));
@@ -618,7 +1078,78 @@ export default function YearPanel({
       >
         {inputMode === 'manual' ? (
           <SectionCard title="完成工事高・元請完成工事高・売上高（手動入力）" accentColor="#1565C0">
-            <ModeToggle value={inputUiMode} onChange={handleInputUiModeChange} />
+            <div
+              style={{
+                background: avgRevenueOverrideEnabled ? '#e3f2fd' : '#f5f5f5',
+                border: `1px solid ${avgRevenueOverrideEnabled ? '#64b5f6' : '#e0e0e0'}`,
+                borderRadius: 6,
+                padding: '10px 12px',
+                marginBottom: 12,
+              }}
+            >
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={avgRevenueOverrideEnabled}
+                  onChange={e => onAvgRevenueOverrideChange?.({ enabled: e.target.checked })}
+                />
+                <span style={{ fontWeight: 'bold', color: '#1565C0' }}>
+                  経審準拠の3年平均値を直接入力する（X1点・Z2点で使用）
+                </span>
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 8 }}>
+                <label style={{ display: 'grid', gap: 4, fontSize: 11, color: avgRevenueOverrideEnabled ? '#1565C0' : '#999' }}>
+                  3年平均 完成工事高（万円）
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={avgRevenueOverride.completionRevenue || ''}
+                    disabled={!avgRevenueOverrideEnabled}
+                    onChange={e => onAvgRevenueOverrideChange?.({
+                      completionRevenue: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                    })}
+                    style={{
+                      padding: '6px 8px',
+                      fontSize: 13,
+                      fontWeight: 'bold',
+                      textAlign: 'right',
+                      border: '1px solid #bbdefb',
+                      borderRadius: 4,
+                      background: avgRevenueOverrideEnabled ? 'white' : '#f5f5f5',
+                    }}
+                  />
+                </label>
+                <label style={{ display: 'grid', gap: 4, fontSize: 11, color: avgRevenueOverrideEnabled ? '#1565C0' : '#999' }}>
+                  3年平均 元請完成工事高（万円）
+                  <input
+                    type="number"
+                    min={0}
+                    step={100}
+                    value={avgRevenueOverride.principalRevenue || ''}
+                    disabled={!avgRevenueOverrideEnabled}
+                    onChange={e => onAvgRevenueOverrideChange?.({
+                      principalRevenue: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                    })}
+                    style={{
+                      padding: '6px 8px',
+                      fontSize: 13,
+                      fontWeight: 'bold',
+                      textAlign: 'right',
+                      border: '1px solid #bbdefb',
+                      borderRadius: 4,
+                      background: avgRevenueOverrideEnabled ? 'white' : '#f5f5f5',
+                    }}
+                  />
+                </label>
+              </div>
+              <div style={{ fontSize: 10, color: '#666', marginTop: 6, lineHeight: 1.5 }}>
+                {avgRevenueOverrideEnabled
+                  ? '※ 下の「完成工事高」「元請完成工事高」スライダーは Y点・売上構成の参考用となり、X1・Z2点には使われません。'
+                  : '※ 経審通知書の「3年平均」値（千円→万円換算）を入れたい場合にONにします。'}
+              </div>
+            </div>
+
             <SimpleSelectRow
               label="対象業種"
               value={yearData.industry}
@@ -665,30 +1196,18 @@ export default function YearPanel({
               />
             </div>
 
-            {isDetailMode && (
-              <>
-                <SimpleSelectRow
-                  label="平均方法"
-                  value={yearData.avgMethod}
-                  onChange={value => onSliderChange('avgMethod', value)}
-                  options={averageMethodOptions}
-                  note="完成工事高(X1)と元請完成工事高(Z2)で同じ平均方法を使います。"
-                />
-
-                <div
-                  style={{
-                    marginTop: 10,
-                    paddingTop: 8,
-                    borderTop: '1px dashed #bbdefb',
-                    fontSize: 11,
-                    color: '#1565C0',
-                    lineHeight: 1.7,
-                  }}
-                >
-                  手動入力では、完成工事高は X1、元請完成工事高は Z2、売上高は Y点にそれぞれ別で使います。
-                </div>
-              </>
-            )}
+            <div
+              style={{
+                marginTop: 10,
+                paddingTop: 8,
+                borderTop: '1px dashed #bbdefb',
+                fontSize: 11,
+                color: '#1565C0',
+                lineHeight: 1.7,
+              }}
+            >
+              完成工事高は X1、元請完成工事高は Z2、売上高は Y点にそれぞれ別で使います。
+            </div>
           </SectionCard>
         ) : (
           <SectionCard title="入札活動（X1点に連動）" accentColor="#1565C0">
@@ -861,6 +1380,12 @@ export default function YearPanel({
         </SectionCard>
 
         <SectionCard title="財務（Y点・X2点に連動）" accentColor="#2E7D32">
+          <FinancialDocPanel
+            doc={yearData.financialDoc || {}}
+            yModel={yModel}
+            onDocChange={partial => onFinancialDocChange?.(partial)}
+            onApply={updates => onMultiSliderChange?.(updates)}
+          />
           <SliderRow
             configKey="profitRate"
             value={yearData.profitRate}
@@ -926,7 +1451,58 @@ export default function YearPanel({
 
         <div style={{ gridColumn: '1 / -1' }}>
           <SectionCard title={`社会性等（W点） → ${score.w}点 → P点 +${(score.w * 0.15).toFixed(1)}点`} accentColor="#E65100">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
+            <div
+              style={{
+                background: wOverrideEnabled ? '#fff3e0' : '#fafafa',
+                border: `1px solid ${wOverrideEnabled ? '#ffb74d' : '#e0e0e0'}`,
+                borderRadius: 6,
+                padding: '10px 12px',
+                marginBottom: 12,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 12,
+                flexWrap: 'wrap',
+              }}
+            >
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={wOverrideEnabled}
+                  onChange={e => onWOverrideChange?.({ enabled: e.target.checked })}
+                />
+                <span style={{ fontWeight: 'bold', color: '#E65100' }}>W点を手動で入力する</span>
+              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <input
+                  type="number"
+                  min={0}
+                  max={2000}
+                  step={1}
+                  value={wOverride.value ?? 0}
+                  disabled={!wOverrideEnabled}
+                  onChange={e => onWOverrideChange?.({ value: Math.max(0, Math.floor(Number(e.target.value) || 0)) })}
+                  style={{
+                    width: 90,
+                    padding: '6px 8px',
+                    fontSize: 14,
+                    fontWeight: 'bold',
+                    textAlign: 'right',
+                    border: '1px solid #ffccbc',
+                    borderRadius: 6,
+                    background: wOverrideEnabled ? 'white' : '#f5f5f5',
+                    color: wOverrideEnabled ? '#E65100' : '#999',
+                  }}
+                />
+                <span style={{ fontSize: 12, color: '#555' }}>点</span>
+              </div>
+              <span style={{ fontSize: 10, color: '#888', flex: '1 1 200px' }}>
+                {wOverrideEnabled
+                  ? '※ 下のチェック項目は反映されません。入力した値がそのままW点になります。'
+                  : '※ チェックすると、下の項目を無視して任意のW点を直接入力できます。'}
+              </span>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 12, opacity: wOverrideEnabled ? 0.5 : 1 }}>
               <div style={{ background: '#fff6f0', borderRadius: 6, padding: '10px 12px' }}>
                 <div style={{ fontSize: 10, color: '#666' }}>W評点</div>
                 <div style={{ fontSize: 22, fontWeight: 'bold', color: '#E65100', marginTop: 2 }}>{score.w}点</div>
@@ -990,7 +1566,7 @@ export default function YearPanel({
               </div>
             </div>
 
-            <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'grid', gap: 10, opacity: wOverrideEnabled ? 0.4 : 1, pointerEvents: wOverrideEnabled ? 'none' : 'auto' }}>
               <WGroup title="まず入れる" meta={`入力 ${wQuickCount} / 4`} defaultOpen>
                 <WCheckRow
                   label="建退共に加入している"

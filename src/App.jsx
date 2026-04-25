@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   calcAllScores,
   createDefaultYears,
@@ -7,6 +7,90 @@ import {
 } from './utils/calculations';
 import PScoreChart from './components/PScoreChart';
 import YearPanel from './components/YearPanel';
+
+const STORAGE_KEY = 'keishin-simulator-state-v1';
+const STORAGE_VERSION = 1;
+const SCENARIOS_KEY = 'keishin-scenarios-v1';
+const ACTIVE_SCENARIO_KEY = 'keishin-active-scenario-v1';
+
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== STORAGE_VERSION) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function saveToStorage(data) {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ version: STORAGE_VERSION, savedAt: new Date().toISOString(), data })
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function clearStorage() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function loadScenarios() {
+  try {
+    const raw = localStorage.getItem(SCENARIOS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== 1) return {};
+    return parsed.scenarios || {};
+  } catch {
+    return {};
+  }
+}
+
+function saveScenariosToStorage(scenarios) {
+  try {
+    localStorage.setItem(SCENARIOS_KEY, JSON.stringify({ version: 1, scenarios }));
+  } catch {
+    // ignore
+  }
+}
+
+function loadActiveScenarioId() {
+  try {
+    return localStorage.getItem(ACTIVE_SCENARIO_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+function saveActiveScenarioId(id) {
+  try {
+    if (id) localStorage.setItem(ACTIVE_SCENARIO_KEY, id);
+    else localStorage.removeItem(ACTIVE_SCENARIO_KEY);
+  } catch {
+    // ignore
+  }
+}
+
+function generateScenarioId() {
+  return `scen-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function fmtDateShort(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 
 const RANK_COLORS = { A: '#43A047', B: '#1E88E5', C: '#FB8C00', D: '#E53935' };
 const YEAR_OPTIONS = [1, 2, 3, 4, 5, 7, 10];
@@ -170,14 +254,128 @@ function syncAutoBidYears(currentYears, baseYear, growthRate) {
 }
 
 export default function App() {
-  const [n, setN] = useState(2);
-  const [targetRank, setTargetRank] = useState('C');
-  const [targetP, setTargetP] = useState(RANK_THRESHOLDS.C);
+  const saved = useMemo(() => loadFromStorage(), []);
+  const [n, setN] = useState(saved?.n ?? 2);
+  const [targetRank, setTargetRank] = useState(saved?.targetRank ?? 'C');
+  const [targetP, setTargetP] = useState(saved?.targetP ?? RANK_THRESHOLDS.C);
   const [activeYear, setActiveYear] = useState(0);
-  const [years, setYears] = useState(() => createDefaultYears(2));
-  const [revenueGrowthRate, setRevenueGrowthRate] = useState(1.0);
-  const [yModel, setYModel] = useState('simple');
-  const [inputMode, setInputMode] = useState('manual');
+  const [years, setYears] = useState(() => saved?.years ?? createDefaultYears(2));
+  const [revenueGrowthRate, setRevenueGrowthRate] = useState(saved?.revenueGrowthRate ?? 1.0);
+  const [yModel, setYModel] = useState(saved?.yModel ?? 'simple');
+  const [inputMode, setInputMode] = useState(saved?.inputMode ?? 'manual');
+  const [savedAt, setSavedAt] = useState(saved ? new Date() : null);
+  const [scenarios, setScenarios] = useState(() => loadScenarios());
+  const [activeScenarioId, setActiveScenarioId] = useState(() => loadActiveScenarioId());
+
+  useEffect(() => {
+    const data = { n, targetRank, targetP, years, revenueGrowthRate, yModel, inputMode };
+    saveToStorage(data);
+    if (activeScenarioId) {
+      setScenarios(prev => {
+        const existing = prev[activeScenarioId];
+        if (!existing) return prev;
+        const updated = { ...existing, data, updatedAt: new Date().toISOString() };
+        const next = { ...prev, [activeScenarioId]: updated };
+        saveScenariosToStorage(next);
+        return next;
+      });
+    }
+    setSavedAt(new Date());
+  }, [n, targetRank, targetP, years, revenueGrowthRate, yModel, inputMode, activeScenarioId]);
+
+  useEffect(() => {
+    saveActiveScenarioId(activeScenarioId);
+  }, [activeScenarioId]);
+
+  const scenarioList = useMemo(
+    () => Object.values(scenarios).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || '')),
+    [scenarios]
+  );
+  const activeScenario = activeScenarioId ? scenarios[activeScenarioId] : null;
+
+  function applyScenarioData(data) {
+    if (!data) return;
+    setN(data.n ?? 2);
+    setTargetRank(data.targetRank ?? 'C');
+    setTargetP(data.targetP ?? RANK_THRESHOLDS.C);
+    setYears(data.years ?? createDefaultYears(data.n ?? 2));
+    setRevenueGrowthRate(data.revenueGrowthRate ?? 1.0);
+    setYModel(data.yModel ?? 'simple');
+    setInputMode(data.inputMode ?? 'manual');
+    setActiveYear(0);
+  }
+
+  function handleSaveAsNewScenario() {
+    const name = window.prompt(
+      '新しいシナリオ名を入力してください',
+      activeScenario?.name ? `${activeScenario.name} のコピー` : '無題のシナリオ'
+    );
+    if (!name || !name.trim()) return;
+    const id = generateScenarioId();
+    const now = new Date().toISOString();
+    const data = { n, targetRank, targetP, years, revenueGrowthRate, yModel, inputMode };
+    const newScenario = { id, name: name.trim(), createdAt: now, updatedAt: now, data };
+    const next = { ...scenarios, [id]: newScenario };
+    setScenarios(next);
+    saveScenariosToStorage(next);
+    setActiveScenarioId(id);
+  }
+
+  function handleLoadScenario(id) {
+    if (!id) {
+      setActiveScenarioId(null);
+      return;
+    }
+    const target = scenarios[id];
+    if (!target) return;
+    if (activeScenarioId !== id) {
+      const ok = window.confirm(
+        `シナリオ「${target.name}」を読み込みます。\n現在の編集内容は${activeScenarioId ? '現在のシナリオに保存されてから' : '破棄されて'}切り替えます。`
+      );
+      if (!ok) return;
+    }
+    applyScenarioData(target.data);
+    setActiveScenarioId(id);
+  }
+
+  function handleRenameScenario() {
+    if (!activeScenario) return;
+    const name = window.prompt('シナリオ名を変更', activeScenario.name);
+    if (!name || !name.trim() || name === activeScenario.name) return;
+    const updated = { ...activeScenario, name: name.trim(), updatedAt: new Date().toISOString() };
+    const next = { ...scenarios, [activeScenario.id]: updated };
+    setScenarios(next);
+    saveScenariosToStorage(next);
+  }
+
+  function handleDeleteScenario() {
+    if (!activeScenario) return;
+    const ok = window.confirm(`シナリオ「${activeScenario.name}」を削除します。元に戻せません。よろしいですか？`);
+    if (!ok) return;
+    const next = { ...scenarios };
+    delete next[activeScenario.id];
+    setScenarios(next);
+    saveScenariosToStorage(next);
+    setActiveScenarioId(null);
+  }
+
+  function handleResetAll() {
+    const ok = window.confirm(
+      '現在の編集内容をリセットして初期状態に戻します。\n\n保存済みのシナリオは残ります。よろしいですか？'
+    );
+    if (!ok) return;
+    clearStorage();
+    setN(2);
+    setTargetRank('C');
+    setTargetP(RANK_THRESHOLDS.C);
+    setActiveYear(0);
+    setYears(createDefaultYears(2));
+    setRevenueGrowthRate(1.0);
+    setYModel('simple');
+    setInputMode('manual');
+    setActiveScenarioId(null);
+    setSavedAt(null);
+  }
 
   const scores = useMemo(
     () => calcAllScores(years, yModel, inputMode),
@@ -307,14 +505,15 @@ export default function App() {
   }
 
   function handlePropagateCurrent() {
-    if (years.length <= 1) return;
+    if (years.length <= activeYear + 1) return;
+    const sourceLabel = activeYear === 0 ? '現在' : `${activeYear}年後`;
     const ok = window.confirm(
-      '「現在」のデータ（経審オーバーライド・決算書・技術職員数・W点など）を、すべての翌年以降にコピーします。\n\n各年ですでに入力した内容は上書きされます。よろしいですか？'
+      `「${sourceLabel}」のデータ（経審オーバーライド・決算書・技術職員数・W点など）を、それ以降のすべての年にコピーします。\n\n各年ですでに入力した内容は上書きされます。よろしいですか？`
     );
     if (!ok) return;
     setYears(prev => {
-      const base = prev[0];
-      const next = prev.map((y, i) => (i === 0 ? y : cloneFutureYear(base, i)));
+      const base = prev[activeYear];
+      const next = prev.map((y, i) => (i <= activeYear ? y : cloneFutureYear(base, i - activeYear)));
       return revenueGrowthRate !== 1.0 ? applyGrowthRate(revenueGrowthRate, next) : next;
     });
   }
@@ -394,12 +593,65 @@ export default function App() {
           boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
         }}
       >
-        <h1 style={{ fontSize: 19, fontWeight: 'bold', letterSpacing: 1 }}>
-          経審スコアシミュレーター
-        </h1>
-        <p style={{ fontSize: 11, marginTop: 3, opacity: 0.7 }}>
-          建設業 経営事項審査 P点 将来シミュレーション
-        </p>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <div>
+            <h1 style={{ fontSize: 19, fontWeight: 'bold', letterSpacing: 1 }}>
+              経審スコアシミュレーター
+            </h1>
+            <p style={{ fontSize: 11, marginTop: 3, opacity: 0.7 }}>
+              建設業 経営事項審査 P点 将来シミュレーション
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <select
+              value={activeScenarioId || ''}
+              onChange={e => handleLoadScenario(e.target.value || null)}
+              style={{
+                fontSize: 11,
+                padding: '4px 8px',
+                borderRadius: 5,
+                border: '1px solid rgba(255,255,255,0.4)',
+                background: 'rgba(255,255,255,0.1)',
+                color: 'white',
+                cursor: 'pointer',
+                maxWidth: 220,
+              }}
+            >
+              <option value="" style={{ color: '#333' }}>— シナリオ未選択（編集中）—</option>
+              {scenarioList.map(s => (
+                <option key={s.id} value={s.id} style={{ color: '#333' }}>
+                  {s.name} ({fmtDateShort(s.updatedAt)})
+                </option>
+              ))}
+            </select>
+            <button type="button" onClick={handleSaveAsNewScenario} title="現在の入力を新しいシナリオとして保存" style={scenarioBtnStyle}>
+              ➕ 新規保存
+            </button>
+            {activeScenario && (
+              <>
+                <button type="button" onClick={handleRenameScenario} title="シナリオ名を変更" style={scenarioBtnStyle}>
+                  ✎ 名前変更
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteScenario}
+                  title="現在のシナリオを削除"
+                  style={{ ...scenarioBtnStyle, background: 'rgba(255,100,100,0.2)' }}
+                >
+                  🗑
+                </button>
+              </>
+            )}
+            <span style={{ fontSize: 10, opacity: 0.8, marginLeft: 4 }}>
+              {savedAt
+                ? `✓ ${savedAt.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                : '—'}
+            </span>
+            <button type="button" onClick={handleResetAll} style={scenarioBtnStyle}>
+              全リセット
+            </button>
+          </div>
+        </div>
       </div>
 
       <div
@@ -687,25 +939,25 @@ export default function App() {
         }}
       >
         <span style={{ fontSize: 11, color: '#666' }}>
-          年別シミュレーション（経審を再現後、翌年以降にコピーすると編集の起点になります）
+          年別シミュレーション（編集中の年を起点に、それ以降の年へコピーできます）
         </span>
         <button
           type="button"
           onClick={handlePropagateCurrent}
-          disabled={years.length <= 1}
+          disabled={years.length <= activeYear + 1}
           style={{
             padding: '6px 14px',
             fontSize: 11,
             fontWeight: 'bold',
-            color: years.length <= 1 ? '#999' : 'white',
-            background: years.length <= 1 ? '#e0e0e0' : '#3949ab',
+            color: years.length <= activeYear + 1 ? '#999' : 'white',
+            background: years.length <= activeYear + 1 ? '#e0e0e0' : '#3949ab',
             border: 'none',
             borderRadius: 6,
-            cursor: years.length <= 1 ? 'not-allowed' : 'pointer',
+            cursor: years.length <= activeYear + 1 ? 'not-allowed' : 'pointer',
             whiteSpace: 'nowrap',
           }}
         >
-          ▶ 現在の入力を翌年以降にコピー
+          ▶ 「{activeYear === 0 ? '現在' : `${activeYear}年後`}」のデータを以降の年にコピー
         </button>
       </div>
 
@@ -768,6 +1020,16 @@ export default function App() {
     </div>
   );
 }
+
+const scenarioBtnStyle = {
+  fontSize: 10,
+  color: 'white',
+  background: 'rgba(255,255,255,0.15)',
+  border: '1px solid rgba(255,255,255,0.4)',
+  borderRadius: 5,
+  padding: '4px 10px',
+  cursor: 'pointer',
+};
 
 const selectStyle = {
   width: '100%',

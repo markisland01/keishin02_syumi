@@ -940,6 +940,7 @@ export default function YearPanel({
   onMultiSliderChange,
 }) {
   const [inputUiMode, setInputUiMode] = useState('simple');
+  const [activeTab, setActiveTab] = useState('revenue');
   const monthlyBids = getMonthlyBids(yearData.staff, yearData.bidsPerStaff);
   const constructionBidRatio = Math.max(0, Math.min(1, Number(yearData.constructionBidRatio ?? 1)));
   const otherWinRate = Math.max(0, Math.min(1, Number(yearData.otherWinRate ?? yearData.winRate ?? 0)));
@@ -1069,13 +1070,52 @@ export default function YearPanel({
 
       <div
         style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          gap: 12,
           padding: 12,
           background: '#f5f6fa',
         }}
       >
+        <div
+          style={{
+            display: 'flex',
+            gap: 4,
+            marginBottom: 10,
+            borderBottom: '2px solid #c5cae9',
+            flexWrap: 'wrap',
+          }}
+        >
+          {[
+            { key: 'revenue', label: '工事高・売上高', color: '#1565C0', sub: `X1 ${score.x1}` },
+            { key: 'tech', label: `技術力 Z`, color: '#6A1B9A', sub: `${score.z}点` },
+            { key: 'finance', label: `財務 Y・X2`, color: '#2E7D32', sub: `Y${score.y}/X2${score.x2}` },
+            { key: 'social', label: `社会性 W`, color: '#E65100', sub: `${score.w}点` },
+          ].map(tab => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              style={{
+                background: activeTab === tab.key ? tab.color : 'white',
+                color: activeTab === tab.key ? 'white' : tab.color,
+                border: `1.5px solid ${tab.color}`,
+                borderBottom: activeTab === tab.key ? `1.5px solid ${tab.color}` : 'none',
+                borderRadius: '6px 6px 0 0',
+                padding: '6px 14px',
+                fontSize: 12,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                marginBottom: -2,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              {tab.label}
+              <span style={{ fontSize: 10, opacity: 0.85, fontWeight: 'normal' }}>{tab.sub}</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: activeTab === 'revenue' ? 'block' : 'none' }}>
         {inputMode === 'manual' ? (
           <SectionCard title="完成工事高・元請完成工事高・売上高（手動入力）" accentColor="#1565C0">
             <div
@@ -1347,7 +1387,9 @@ export default function YearPanel({
             )}
           </SectionCard>
         )}
+        </div>
 
+        <div style={{ display: activeTab === 'tech' ? 'block' : 'none' }}>
         <SectionCard title={`技術力（Z点） → ${score.z}点 → P点 +${(score.z * 0.25).toFixed(1)}点`} accentColor="#6A1B9A">
           <div style={{ fontSize: 11, color: '#555', lineHeight: 1.7, marginBottom: 10 }}>
             対象業種ごとに、技術職員点(Z1)と元請完成工事高点(Z2)を合算します。
@@ -1378,7 +1420,9 @@ export default function YearPanel({
             </div>
           </div>
         </SectionCard>
+        </div>
 
+        <div style={{ display: activeTab === 'finance' ? 'block' : 'none' }}>
         <SectionCard title="財務（Y点・X2点に連動）" accentColor="#2E7D32">
           <FinancialDocPanel
             doc={yearData.financialDoc || {}}
@@ -1386,26 +1430,66 @@ export default function YearPanel({
             onDocChange={partial => onFinancialDocChange?.(partial)}
             onApply={updates => onMultiSliderChange?.(updates)}
           />
-          <SliderRow
-            configKey="profitRate"
-            value={yearData.profitRate}
-            onChange={value => onSliderChange('profitRate', value)}
-          />
-          <SliderRow
-            configKey="equity"
-            value={yearData.equity}
-            onChange={value => onSliderChange('equity', value)}
-          />
-          <SliderRow
-            configKey="debt"
-            value={yearData.debt}
-            onChange={value => onSliderChange('debt', value)}
-          />
-          <SliderRow
-            configKey="interest"
-            value={yearData.interest}
-            onChange={value => onSliderChange('interest', value)}
-          />
+          <div style={{ marginBottom: 12 }}>
+            <SliderRow
+              configKey="profitRate"
+              value={yearData.profitRate}
+              onChange={value => onSliderChange('profitRate', value)}
+            />
+            <InlineNumberInput
+              value={Math.round(yearData.profitRate * 1000) / 10}
+              onChange={value => onSliderChange('profitRate', value / 100)}
+              min={1}
+              max={20}
+              step={0.5}
+              unitText="%"
+            />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <SliderRow
+              configKey="equity"
+              value={yearData.equity}
+              onChange={value => onSliderChange('equity', value)}
+            />
+            <InlineNumberInput
+              value={yearData.equity}
+              onChange={value => onSliderChange('equity', value)}
+              min={500}
+              max={50000}
+              step={100}
+              unitText="万円"
+            />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <SliderRow
+              configKey="debt"
+              value={yearData.debt}
+              onChange={value => onSliderChange('debt', value)}
+            />
+            <InlineNumberInput
+              value={yearData.debt}
+              onChange={value => onSliderChange('debt', value)}
+              min={0}
+              max={50000}
+              step={100}
+              unitText="万円"
+            />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <SliderRow
+              configKey="interest"
+              value={yearData.interest}
+              onChange={value => onSliderChange('interest', value)}
+            />
+            <InlineNumberInput
+              value={yearData.interest}
+              onChange={value => onSliderChange('interest', value)}
+              min={0}
+              max={2000}
+              step={10}
+              unitText="万円/年"
+            />
+          </div>
         </SectionCard>
 
         {yModel === 'full' && (
@@ -1448,8 +1532,9 @@ export default function YearPanel({
             </div>
           </SectionCard>
         )}
+        </div>
 
-        <div style={{ gridColumn: '1 / -1' }}>
+        <div style={{ display: activeTab === 'social' ? 'block' : 'none' }}>
           <SectionCard title={`社会性等（W点） → ${score.w}点 → P点 +${(score.w * 0.15).toFixed(1)}点`} accentColor="#E65100">
             <div
               style={{

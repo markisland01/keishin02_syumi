@@ -264,6 +264,7 @@ export default function App() {
   const [yModel, setYModel] = useState(saved?.yModel ?? 'simple');
   const [inputMode, setInputMode] = useState(saved?.inputMode ?? 'manual');
   const [savedAt, setSavedAt] = useState(saved ? new Date() : null);
+  const [showSettings, setShowSettings] = useState(false);
   const [scenarios, setScenarios] = useState(() => loadScenarios());
   const [activeScenarioId, setActiveScenarioId] = useState(() => loadActiveScenarioId());
 
@@ -589,35 +590,77 @@ export default function App() {
           background: 'linear-gradient(135deg, #1a237e, #283593)',
           color: 'white',
           borderRadius: '10px 10px 0 0',
-          padding: '14px 22px',
+          padding: '8px 16px',
           boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-          <div>
-            <h1 style={{ fontSize: 19, fontWeight: 'bold', letterSpacing: 1 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'nowrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
+            <h1 style={{ fontSize: 15, fontWeight: 'bold', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>
               経審スコアシミュレーター
             </h1>
-            <p style={{ fontSize: 11, marginTop: 3, opacity: 0.7 }}>
-              建設業 経営事項審査 P点 将来シミュレーション
-            </p>
+            <button
+              type="button"
+              onClick={() => setShowSettings(prev => !prev)}
+              title="初期設定"
+              style={{
+                fontSize: 11,
+                padding: '4px 8px',
+                borderRadius: 6,
+                border: '1px solid rgba(255,255,255,0.4)',
+                background: showSettings ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.1)',
+                color: 'white',
+                cursor: 'pointer',
+                fontWeight: 'bold',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {showSettings ? '▲' : '⚙'} 初期設定
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>現在</span>
+              <RankBadge rank={currentScore.rank} size="md" />
+              <span style={{ fontSize: 14, fontWeight: 'bold' }}>{currentScore.p}</span>
+            </div>
+            <span style={{ fontSize: 14, opacity: 0.5 }}>&rarr;</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span style={{ fontSize: 10, opacity: 0.7 }}>{n}年後</span>
+              <RankBadge rank={latestScore.rank} size="md" />
+              <span style={{ fontSize: 14, fontWeight: 'bold' }}>{latestScore.p}</span>
+            </div>
+            <div
+              style={{
+                background: targetMet ? 'rgba(76,175,80,0.25)' : 'rgba(255,152,0,0.25)',
+                color: targetMet ? '#A5D6A7' : '#FFCC80',
+                border: targetMet ? '1px solid rgba(165,214,167,0.5)' : '1px solid rgba(255,204,128,0.5)',
+                borderRadius: 12,
+                padding: '2px 10px',
+                fontWeight: 'bold',
+                fontSize: 11,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {targetMet
+                ? `目標達成`
+                : `目標まで あと${gap}点`}
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
             <select
               value={activeScenarioId || ''}
               onChange={e => handleLoadScenario(e.target.value || null)}
               style={{
                 fontSize: 11,
-                padding: '4px 8px',
+                padding: '3px 6px',
                 borderRadius: 5,
                 border: '1px solid rgba(255,255,255,0.4)',
                 background: 'rgba(255,255,255,0.1)',
                 color: 'white',
                 cursor: 'pointer',
-                maxWidth: 220,
+                maxWidth: 130,
               }}
             >
-              <option value="" style={{ color: '#333' }}>— シナリオ未選択（編集中）—</option>
+              <option value="" style={{ color: '#333' }}>— シナリオ —</option>
               {scenarioList.map(s => (
                 <option key={s.id} value={s.id} style={{ color: '#333' }}>
                   {s.name} ({fmtDateShort(s.updatedAt)})
@@ -625,12 +668,12 @@ export default function App() {
               ))}
             </select>
             <button type="button" onClick={handleSaveAsNewScenario} title="現在の入力を新しいシナリオとして保存" style={scenarioBtnStyle}>
-              ➕ 新規保存
+              ➕保存
             </button>
             {activeScenario && (
               <>
                 <button type="button" onClick={handleRenameScenario} title="シナリオ名を変更" style={scenarioBtnStyle}>
-                  ✎ 名前変更
+                  ✎
                 </button>
                 <button
                   type="button"
@@ -642,13 +685,8 @@ export default function App() {
                 </button>
               </>
             )}
-            <span style={{ fontSize: 10, opacity: 0.8, marginLeft: 4 }}>
-              {savedAt
-                ? `✓ ${savedAt.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
-                : '—'}
-            </span>
-            <button type="button" onClick={handleResetAll} style={scenarioBtnStyle}>
-              全リセット
+            <button type="button" onClick={handleResetAll} title="全リセット" style={scenarioBtnStyle}>
+              リセット
             </button>
           </div>
         </div>
@@ -657,26 +695,20 @@ export default function App() {
       <div
         style={{
           background: '#e8eaf6',
-          border: '1.5px solid #9fa8da',
+          border: showSettings ? '1.5px solid #9fa8da' : 'none',
           borderTop: 'none',
           borderRadius: '0 0 10px 10px',
-          padding: '14px 20px 16px',
-          marginBottom: 14,
+          padding: showSettings ? '14px 20px 16px' : '0 20px',
+          marginBottom: showSettings ? 14 : 0,
+          overflow: 'hidden',
+          transition: 'padding 0.2s ease, margin 0.2s ease',
         }}
       >
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 'bold',
-            color: '#3949ab',
-            marginBottom: 12,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-          }}
-        >
-          設定項目
-        </div>
+        <div style={{
+          maxHeight: showSettings ? 500 : 0,
+          overflow: 'hidden',
+          transition: 'max-height 0.3s ease',
+        }}>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16 }}>
           <div>
@@ -882,46 +914,6 @@ export default function App() {
               : '※ 手動入力では、完成工事高・元請完成工事高・売上高を別々に入力します。'}
           </span>
         </div>
-      </div>
-
-      <div
-        style={{
-          background: 'white',
-          borderRadius: 10,
-          padding: '12px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 20,
-          marginBottom: 12,
-          boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-          flexWrap: 'wrap',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, color: '#888' }}>現在</span>
-          <RankBadge rank={currentScore.rank} size="lg" />
-          <span style={{ fontSize: 18, fontWeight: 'bold' }}>{currentScore.p}点</span>
-        </div>
-        <span style={{ fontSize: 22, color: '#bbb' }}>&rarr;</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, color: '#888' }}>{n}年後</span>
-          <RankBadge rank={latestScore.rank} size="lg" />
-          <span style={{ fontSize: 18, fontWeight: 'bold' }}>{latestScore.p}点</span>
-        </div>
-        <div
-          style={{
-            marginLeft: 'auto',
-            background: targetMet ? '#E8F5E9' : '#FFF3E0',
-            color: targetMet ? '#2E7D32' : '#E65100',
-            borderRadius: 20,
-            padding: '7px 18px',
-            fontWeight: 'bold',
-            fontSize: 14,
-          }}
-        >
-          {targetMet
-            ? `目標（${targetP}点）達成`
-            : `目標 ${targetP}点まで あと ${gap}点`}
         </div>
       </div>
 

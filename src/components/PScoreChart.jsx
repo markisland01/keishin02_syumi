@@ -19,17 +19,23 @@ const RANK_COLORS = {
   D: '#E53935',
 };
 
-export default function PScoreChart({ scores, targetP }) {
+export default function PScoreChart({ scores, baselineScores = [], activeYear = 0, onSelectYear, targetP, showComponents = false }) {
   const data = scores.map((s, i) => ({
     year: i === 0 ? '現在' : `${i}年後`,
-    P点: s.p,
+    詳細P点: s.yDetail?.status === 'complete' ? s.p : null,
+    参考P点: s.yDetail?.status === 'complete' ? null : s.p,
+    計算状態: s.yDetail?.status === 'complete' ? '詳細計算' : s.p == null ? '未算定' : '参考推計・旧方式',
     X1点: s.x1,
     Y点: s.y,
     Z点: s.z,
+    基準P点: baselineScores[i]?.p ?? null,
   }));
 
-  const minY = 500;
-  const maxY = 960;
+  const scoreValues = data.flatMap(item => [item.詳細P点, item.参考P点, item.基準P点]).filter(value => Number.isFinite(value));
+  const minValue = scoreValues.length ? Math.min(...scoreValues, RANK_THRESHOLDS.C) : 500;
+  const maxValue = scoreValues.length ? Math.max(...scoreValues, targetP || 0, RANK_THRESHOLDS.A) : 960;
+  const minY = Math.max(0, Math.floor((minValue - 60) / 50) * 50);
+  const maxY = Math.ceil((maxValue + 40) / 50) * 50;
 
   function CustomTooltip({ active, payload, label }) {
     if (!active || !payload?.length) return null;
@@ -45,6 +51,7 @@ export default function PScoreChart({ scores, targetP }) {
         }}
       >
         <p style={{ fontWeight: 'bold', marginBottom: 6 }}>{label}</p>
+        <p>{payload[0]?.payload.計算状態}</p>
         {payload.map(p => (
           <p key={p.name} style={{ color: p.color, margin: '2px 0' }}>
             {p.name}: {p.value}点
@@ -56,6 +63,7 @@ export default function PScoreChart({ scores, targetP }) {
 
   return (
     <div
+      className="simulator-score-chart"
       style={{
         background: 'white',
         borderRadius: 10,
@@ -64,9 +72,22 @@ export default function PScoreChart({ scores, targetP }) {
         boxShadow: '0 1px 4px rgba(0,0,0,0.1)',
       }}
     >
-      <ResponsiveContainer width="100%" height={260}>
-        <LineChart data={data} margin={{ top: 8, right: 40, left: 0, bottom: 0 }}>
+      <div className="simulator-chart-plot">
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart
+          data={data}
+          margin={{ top: 8, right: 40, left: 0, bottom: 0 }}
+          onClick={state => {
+            const label = state?.activeLabel;
+            const nextIndex = data.findIndex(item => item.year === label);
+            if (nextIndex >= 0) onSelectYear?.(nextIndex);
+          }}
+        >
           <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+
+          {data[activeYear] && (
+            <ReferenceLine x={data[activeYear].year} stroke="#3949ab" strokeWidth={2} strokeOpacity={0.32} />
+          )}
 
           <ReferenceArea y1={RANK_THRESHOLDS.A} y2={maxY} fill="#43A04715" />
           <ReferenceArea y1={RANK_THRESHOLDS.B} y2={RANK_THRESHOLDS.A} fill="#1E88E515" />
@@ -107,51 +128,33 @@ export default function PScoreChart({ scores, targetP }) {
             />
           )}
 
-          <XAxis dataKey="year" tick={{ fontSize: 13 }} />
+          <XAxis dataKey="year" interval="preserveStartEnd" tick={{ fontSize: 11 }} />
           <YAxis domain={[minY, maxY]} tick={{ fontSize: 12 }} width={42} />
           <Tooltip content={<CustomTooltip />} />
 
+          {showComponents && <>
+            <Line type="monotone" dataKey="X1点" stroke="#1976D2" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 3 }} activeDot={{ r: 5 }} />
+            <Line type="monotone" dataKey="Y点" stroke="#388E3C" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 3 }} activeDot={{ r: 5 }} />
+            <Line type="monotone" dataKey="Z点" stroke="#7B1FA2" strokeWidth={1.5} strokeDasharray="4 3" dot={{ r: 3 }} activeDot={{ r: 5 }} />
+          </>}
           <Line
             type="monotone"
-            dataKey="X1点"
-            stroke="#1976D2"
-            strokeWidth={1.5}
-            strokeDasharray="4 3"
-            dot={{ r: 3 }}
-            activeDot={{ r: 5 }}
-          />
-          <Line
-            type="monotone"
-            dataKey="Y点"
-            stroke="#388E3C"
-            strokeWidth={1.5}
-            strokeDasharray="4 3"
-            dot={{ r: 3 }}
-            activeDot={{ r: 5 }}
-          />
-          <Line
-            type="monotone"
-            dataKey="Z点"
-            stroke="#7B1FA2"
-            strokeWidth={1.5}
-            strokeDasharray="4 3"
-            dot={{ r: 3 }}
-            activeDot={{ r: 5 }}
-          />
-          <Line
-            type="monotone"
-            dataKey="P点"
+            dataKey="詳細P点"
             stroke="#212121"
             strokeWidth={3}
             dot={{ r: 6, fill: '#212121' }}
             activeDot={{ r: 8 }}
           />
+          <Line type="monotone" dataKey="参考P点" stroke="#666" strokeWidth={2} strokeDasharray="5 4" dot={{r:5,fill:'white'}} />
+          <Line type="monotone" dataKey="基準P点" stroke="#9aa5bd" strokeWidth={1.5} strokeDasharray="2 4" dot={{ r: 3, fill: '#fff', stroke: '#9aa5bd' }} />
 
           <Legend wrapperStyle={{ fontSize: 12, paddingTop: 4 }} />
         </LineChart>
       </ResponsiveContainer>
+      </div>
 
       <div
+        className="simulator-chart-rank-legend"
         style={{
           display: 'flex',
           gap: 16,

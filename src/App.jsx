@@ -1,15 +1,26 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   calcAllScores,
   createDefaultYears,
   getRank,
+  getMissingDetailedYInputKeys,
+  hasCompleteDetailedYInputs,
+  migrateSavedYears,
   RANK_THRESHOLDS,
+  Y_DETAIL_FIELD_KEYS,
+  Y_DETAIL_FIELD_LABELS,
 } from './utils/calculations';
+import { extractKeishinPdf } from './utils/keishinPdfParser';
+import KeishinPdfImport from './components/KeishinPdfImport';
 import PScoreChart from './components/PScoreChart';
 import YearPanel from './components/YearPanel';
+import AccuracyPanel from './components/AccuracyPanel';
+import { applyFinancialImport, cloneForecastAccuracy } from './utils/accuracyState.js';
+import { changeDocumentUnit } from './utils/financialCalculations.js';
+import './simulator-layout.css';
 
 const STORAGE_KEY = 'keishin-simulator-state-v1';
-const STORAGE_VERSION = 1;
+const STORAGE_VERSION = 2;
 const SCENARIOS_KEY = 'keishin-scenarios-v1';
 const ACTIVE_SCENARIO_KEY = 'keishin-active-scenario-v1';
 
@@ -18,8 +29,11 @@ function loadFromStorage() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (parsed?.version !== STORAGE_VERSION) return null;
-    return parsed.data;
+    if (![1, STORAGE_VERSION].includes(parsed?.version)) return null;
+    return {
+      ...parsed.data,
+      years: parsed.data?.years ? migrateSavedYears(parsed.data.years) : undefined,
+    };
   } catch {
     return null;
   }
@@ -27,11 +41,13 @@ function loadFromStorage() {
 
 function saveToStorage(data) {
   try {
+    const previous = localStorage.getItem(STORAGE_KEY);
+    if (previous && !localStorage.getItem(STORAGE_KEY + '-backup')) localStorage.setItem(STORAGE_KEY + '-backup', previous);
     localStorage.setItem(
       STORAGE_KEY,
       JSON.stringify({ version: STORAGE_VERSION, savedAt: new Date().toISOString(), data })
     );
-    return true;
+    return JSON.parse(localStorage.getItem(STORAGE_KEY))?.version === STORAGE_VERSION;
   } catch {
     return false;
   }
@@ -50,7 +66,7 @@ function loadScenarios() {
     const raw = localStorage.getItem(SCENARIOS_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
-    if (parsed?.version !== 1) return {};
+    if (![1, 2].includes(parsed?.version)) return {};
     return parsed.scenarios || {};
   } catch {
     return {};
@@ -59,7 +75,9 @@ function loadScenarios() {
 
 function saveScenariosToStorage(scenarios) {
   try {
-    localStorage.setItem(SCENARIOS_KEY, JSON.stringify({ version: 1, scenarios }));
+    const previous = localStorage.getItem(SCENARIOS_KEY);
+    if (previous && !localStorage.getItem(SCENARIOS_KEY + '-backup')) localStorage.setItem(SCENARIOS_KEY + '-backup', previous);
+    localStorage.setItem(SCENARIOS_KEY, JSON.stringify({ version: 2, scenarios }));
   } catch {
     // ignore
   }
@@ -93,7 +111,7 @@ function fmtDateShort(iso) {
 }
 
 const RANK_COLORS = { A: '#43A047', B: '#1E88E5', C: '#FB8C00', D: '#E53935' };
-const YEAR_OPTIONS = [1, 2, 3, 4, 5, 7, 10];
+const YEAR_OPTIONS = Array.from({ length: 10 }, (_, index) => index + 1);
 const GROWTH_OPTIONS = [
   { value: 1.0, label: '成長なし（0%）' },
   { value: 1.05, label: '+5%/年' },
@@ -166,6 +184,38 @@ function cloneZInput(zInput = {}) {
   };
 }
 
+function cloneScoreOverrides(scoreOverrides = {}) {
+  return {
+    w: scoreOverrides?.w != null && scoreOverrides.w !== '' && Number.isFinite(Number(scoreOverrides.w)) ? Math.round(Number(scoreOverrides.w)) : null,
+  };
+}
+
+function cloneProvidedInputs(providedInputs = {}) {
+  return {
+    detailedY: {
+      grossProfitRate: Boolean(providedInputs?.detailedY?.grossProfitRate),
+      fixedAssets: Boolean(providedInputs?.detailedY?.fixedAssets),
+      operatingCF: Boolean(providedInputs?.detailedY?.operatingCF),
+      retainedEarnings: Boolean(providedInputs?.detailedY?.retainedEarnings),
+    },
+  };
+}
+
+function cloneBaselineYears(sourceYears) {
+  return sourceYears.map(year => structuredClone(year));
+}
+
+function yearsDiffer(current, baseline) {
+  return JSON.stringify(current) !== JSON.stringify(baseline);
+}
+
+function clearWOverride(scoreOverrides = {}) {
+  return {
+    ...cloneScoreOverrides(scoreOverrides),
+    w: null,
+  };
+}
+
 function getBusinessYearsValue(value, yearOffset = 0) {
   return Math.max(0, Number(value || 0) + yearOffset);
 }
@@ -211,12 +261,15 @@ function cloneFutureYear(baseYear, yearOffset = 0) {
 
   return {
     ...baseYear,
+    ...cloneForecastAccuracy(baseYear),
     zInput: cloneZInput(baseYear.zInput),
     wItems: { ...baseYear.wItems },
     wInput: nextWInput,
     wOverride: { ...(baseYear.wOverride || { enabled: false, value: 0 }) },
     avgRevenueOverride: { ...(baseYear.avgRevenueOverride || { enabled: false, completionRevenue: 0, principalRevenue: 0 }) },
     financialDoc: { ...(baseYear.financialDoc || {}) },
+    scoreOverrides: cloneScoreOverrides(),
+    providedInputs: cloneProvidedInputs(baseYear.providedInputs),
   };
 }
 
@@ -253,7 +306,106 @@ function syncAutoBidYears(currentYears, baseYear, growthRate) {
   });
 }
 
-export default function App() {
+function mergeWInputPatch(baseWInput, patchWInput) {
+  const nextWInput = cloneWInput(baseWInput);
+
+  for (const [sectionKey, sectionPatch] of Object.entries(patchWInput || {})) {
+    nextWInput[sectionKey] = {
+      ...(nextWInput[sectionKey] || {}),
+      ...(sectionPatch || {}),
+    };
+  }
+
+  return nextWInput;
+}
+
+function mergeKeishinImportPatch(yearData, patch = {}) {
+  const { zInput, wInput, scoreOverrides, _references, ...directValues } = patch;
+  const nextYear = {
+    ...yearData,
+    ...directValues,
+  };
+
+  if (zInput) {
+    nextYear.zInput = {
+      ...cloneZInput(yearData.zInput),
+      ...zInput,
+    };
+  }
+
+  if (wInput) {
+    nextYear.wInput = mergeWInputPatch(yearData.wInput, wInput);
+  }
+
+  // Notice averages are inputs to X1/Z2, not current-period revenue.
+  if (_references?.avgKanseikoujidaka != null || _references?.avgMotoukeKoujidaka != null) {
+    nextYear.avgRevenueOverride = {
+      ...yearData.avgRevenueOverride,
+      enabled: true,
+      completionRevenue: _references.avgKanseikoujidaka ?? yearData.avgRevenueOverride?.completionRevenue ?? null,
+      principalRevenue: _references.avgMotoukeKoujidaka ?? yearData.avgRevenueOverride?.principalRevenue ?? null,
+    };
+  }
+
+  // Reference scores never enable an override.
+
+  const nextProvidedInputs = cloneProvidedInputs(yearData.providedInputs);
+  for (const key of Y_DETAIL_FIELD_KEYS) {
+    if (patch[key] != null) nextProvidedInputs.detailedY[key] = true;
+  }
+  nextYear.providedInputs = nextProvidedInputs;
+
+  if (patch.motoukeKoujidaka != null) {
+    nextYear.motoukeSameAsKansei = patch.kanseikoujidaka != null
+      ? Number(patch.motoukeKoujidaka) === Number(patch.kanseikoujidaka)
+      : false;
+  }
+
+  return nextYear;
+}
+
+function hasManualRevenuePatch(patch = {}) {
+  return ['kanseikoujidaka', 'uriage', 'motoukeKoujidaka'].some(key => patch[key] != null);
+}
+
+function hasDetailedYPatch(patch = {}) {
+  return ['grossProfitRate', 'fixedAssets', 'operatingCF', 'retainedEarnings'].some(key => patch[key] != null);
+}
+
+function getMissingDetailedYLabels(yearData) {
+  return getMissingDetailedYInputKeys(yearData).map(key => Y_DETAIL_FIELD_LABELS[key] || key);
+}
+
+function buildPdfImportResult(currentYear, rawResult) {
+  const result = {
+    ...rawResult,
+    warnings: [...(rawResult?.warnings || [])],
+  };
+  const mergedYear = mergeKeishinImportPatch(currentYear, result.patch || {});
+  const touchedDetailedY = hasDetailedYPatch(result.patch) || result?.referenceScores?.y != null;
+
+
+  if (touchedDetailedY && !hasCompleteDetailedYInputs(mergedYear)) {
+    const missingLabels = getMissingDetailedYLabels(mergedYear);
+    if (missingLabels.length > 0) {
+      result.warnings.push(
+        `Y\u70b9\u306e\u8a73\u7d30\u8a08\u7b97\u306b\u5fc5\u8981\u306a\u9805\u76ee\u304c\u4e0d\u8db3\u3057\u3066\u3044\u308b\u305f\u3081\u3001\u7c21\u6613\u8a08\u7b97\u3092\u4f7f\u3044\u307e\u3059: ${missingLabels.join('\u3001')}`
+      );
+    }
+  }
+
+  return result;
+}
+
+function shouldSwitchToManualMode(patch = {}, result = null) {
+  if (hasManualRevenuePatch(patch)) return true;
+  if (patch?._references?.avgKanseikoujidaka != null) return true;
+  if (patch?._references?.avgMotoukeKoujidaka != null) return true;
+  if (result?.referenceScores?.x1 != null) return true;
+  return false;
+}
+
+export default function App({ initialShowSettings = false }) {
   const saved = useMemo(() => loadFromStorage(), []);
   const [n, setN] = useState(saved?.n ?? 2);
   const [targetRank, setTargetRank] = useState(saved?.targetRank ?? 'C');
@@ -261,16 +413,29 @@ export default function App() {
   const [activeYear, setActiveYear] = useState(0);
   const [years, setYears] = useState(() => saved?.years ?? createDefaultYears(2));
   const [revenueGrowthRate, setRevenueGrowthRate] = useState(saved?.revenueGrowthRate ?? 1.0);
-  const [yModel, setYModel] = useState(saved?.yModel ?? 'simple');
+  const [yModel, setYModel] = useState(saved?.yModel ?? 'full');
   const [inputMode, setInputMode] = useState(saved?.inputMode ?? 'manual');
+  const [baselineYears, setBaselineYears] = useState(() => cloneBaselineYears(saved?.years ?? createDefaultYears(2)));
+  const [activeCategory, setActiveCategory] = useState('revenue');
   const [savedAt, setSavedAt] = useState(saved ? new Date() : null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(initialShowSettings);
   const [scenarios, setScenarios] = useState(() => loadScenarios());
   const [activeScenarioId, setActiveScenarioId] = useState(() => loadActiveScenarioId());
+  const pdfImportRequest = useRef(0);
+
+  function invalidatePdfImport() {
+    pdfImportRequest.current += 1;
+    setPdfImportState({ status: 'idle' });
+  }
+
+  useLayoutEffect(() => {
+    invalidatePdfImport();
+    return () => { pdfImportRequest.current += 1; };
+  }, [activeScenarioId, activeYear]);
 
   useEffect(() => {
     const data = { n, targetRank, targetP, years, revenueGrowthRate, yModel, inputMode };
-    saveToStorage(data);
+    const didSave = saveToStorage(data);
     if (activeScenarioId) {
       setScenarios(prev => {
         const existing = prev[activeScenarioId];
@@ -281,7 +446,7 @@ export default function App() {
         return next;
       });
     }
-    setSavedAt(new Date());
+    setSavedAt(didSave ? new Date() : null);
   }, [n, targetRank, targetP, years, revenueGrowthRate, yModel, inputMode, activeScenarioId]);
 
   useEffect(() => {
@@ -296,10 +461,13 @@ export default function App() {
 
   function applyScenarioData(data) {
     if (!data) return;
+    invalidatePdfImport();
+    const nextYears = data.years ? migrateSavedYears(data.years) : createDefaultYears(data.n ?? 2);
     setN(data.n ?? 2);
     setTargetRank(data.targetRank ?? 'C');
     setTargetP(data.targetP ?? RANK_THRESHOLDS.C);
-    setYears(data.years ?? createDefaultYears(data.n ?? 2));
+    setYears(nextYears);
+    setBaselineYears(cloneBaselineYears(nextYears));
     setRevenueGrowthRate(data.revenueGrowthRate ?? 1.0);
     setYModel(data.yModel ?? 'simple');
     setInputMode(data.inputMode ?? 'manual');
@@ -366,27 +534,49 @@ export default function App() {
     );
     if (!ok) return;
     clearStorage();
+    invalidatePdfImport();
     setN(2);
     setTargetRank('C');
     setTargetP(RANK_THRESHOLDS.C);
     setActiveYear(0);
-    setYears(createDefaultYears(2));
+    const resetYears = createDefaultYears(2);
+    setYears(resetYears);
+    setBaselineYears(cloneBaselineYears(resetYears));
     setRevenueGrowthRate(1.0);
     setYModel('simple');
     setInputMode('manual');
     setActiveScenarioId(null);
     setSavedAt(null);
   }
+  const [pdfImportState, setPdfImportState] = useState({ status: 'idle' });
 
   const scores = useMemo(
-    () => calcAllScores(years, yModel, inputMode),
-    [years, yModel, inputMode]
+    () => calcAllScores(years.slice(0, n + 1), yModel, inputMode),
+    [years, n, yModel, inputMode]
+  );
+  const baselineScores = useMemo(
+    () => calcAllScores(baselineYears.slice(0, n + 1), yModel, inputMode),
+    [baselineYears, n, yModel, inputMode]
   );
 
   const currentScore = scores[0];
   const latestScore = scores[scores.length - 1];
-  const targetMet = latestScore.p >= targetP;
-  const gap = targetP - latestScore.p;
+  const selectedScore = scores[activeYear] || scores[0];
+  const selectedBaselineScore = baselineScores[activeYear] || baselineScores[0];
+  const selectedPDelta = selectedScore?.p != null && selectedBaselineScore?.p != null
+    ? selectedScore.p - selectedBaselineScore.p
+    : null;
+  const selectedPLabel = selectedScore?.p == null
+    ? '（未算定）'
+    : yModel === 'simple' || selectedScore?.yDetail?.status === 'estimate'
+      ? '（参考推計）'
+      : selectedScore?.yDetail?.status === 'complete'
+        ? '（詳細計算）'
+        : selectedScore?.calculationVersion !== 'accuracy-v2'
+          ? '（旧方式）'
+          : '（参考推計）';
+  const targetMet = latestScore.p != null && latestScore.p >= targetP;
+  const gap = latestScore.p == null ? null : targetP - latestScore.p;
 
   function handleTargetRankChange(rank) {
     setTargetRank(rank);
@@ -427,6 +617,7 @@ export default function App() {
 
       return {
         ...y,
+        ...cloneForecastAccuracy(y),
         staff: newStaff,
         bidsPerStaff: newBps,
         avgProfit: newAvgProfit,
@@ -449,19 +640,29 @@ export default function App() {
   function handleNChange(newN) {
     setN(newN);
     setYears(prev => {
-      let next;
+      let next = [...prev];
+      const existingLength = prev.length;
 
       if (newN + 1 > prev.length) {
-        next = [...prev];
         for (let i = prev.length; i <= newN; i += 1) {
           const source = next[i - 1] || prev[0];
           next.push(cloneFutureYear(source, 1));
         }
-      } else {
-        next = prev.slice(0, newN + 1);
       }
 
-      return revenueGrowthRate !== 1.0 ? applyGrowthRate(revenueGrowthRate, next) : next;
+      if (revenueGrowthRate === 1.0 || existingLength > newN) return next;
+      const grown = applyGrowthRate(revenueGrowthRate, next);
+      return grown.map((year, index) => (index < existingLength ? next[index] : year));
+    });
+    setBaselineYears(prev => {
+      let next = [...prev];
+      if (newN + 1 > prev.length) {
+        for (let i = prev.length; i <= newN; i += 1) {
+          const source = next[i - 1] || prev[0];
+          next.push(cloneFutureYear(source, 1));
+        }
+      }
+      return next;
     });
 
     if (activeYear > newN) setActiveYear(newN);
@@ -469,7 +670,16 @@ export default function App() {
 
   function handleSliderChange(yearIdx, key, value) {
     setYears(prev => {
-      const nextYears = prev.map((y, i) => (i === yearIdx ? { ...y, [key]: value } : y));
+      const nextYears = prev.map((y, i) => {
+        if (i !== yearIdx) return y;
+
+        const nextYear = { ...y, [key]: value };
+        if (Y_DETAIL_FIELD_KEYS.includes(key)) {
+          nextYear.providedInputs = cloneProvidedInputs(y.providedInputs);
+          nextYear.providedInputs.detailedY[key] = true;
+        }
+        return nextYear;
+      });
 
       if (inputMode === 'auto' && yearIdx === 0 && AUTO_BID_SYNC_KEYS.has(key)) {
         return syncAutoBidYears(nextYears, nextYears[0], revenueGrowthRate);
@@ -486,6 +696,7 @@ export default function App() {
         return {
           ...y,
           wInput: applyWInputValue(y.wInput, path, value, i - yearIdx),
+          scoreOverrides: clearWOverride(y.scoreOverrides),
         };
       })
     );
@@ -495,18 +706,25 @@ export default function App() {
     setYears(prev =>
       prev.map((y, i) => (
         i === yearIdx
-          ? { ...y, financialDoc: { ...(y.financialDoc || {}), ...partial } }
+          ? { ...y, financialDoc: partial.unit ? changeDocumentUnit(y.financialDoc || {}, partial.unit) : { ...(y.financialDoc || {}), ...partial } }
           : y
       ))
     );
   }
 
   function handleMultiSliderChange(yearIdx, updates) {
-    setYears(prev => prev.map((y, i) => (i === yearIdx ? { ...y, ...updates } : y)));
+    setYears(prev => prev.map((y, i) => {
+      if (i !== yearIdx) return y;
+      const providedInputs = cloneProvidedInputs(y.providedInputs);
+      for (const key of Y_DETAIL_FIELD_KEYS) {
+        if (updates[key] != null) providedInputs.detailedY[key] = true;
+      }
+      return { ...y, ...updates, providedInputs };
+    }));
   }
 
   function handlePropagateCurrent() {
-    if (years.length <= activeYear + 1) return;
+    if (activeYear >= n) return;
     const sourceLabel = activeYear === 0 ? '現在' : `${activeYear}年後`;
     const ok = window.confirm(
       `「${sourceLabel}」のデータ（経審オーバーライド・決算書・技術職員数・W点など）を、それ以降のすべての年にコピーします。\n\n各年ですでに入力した内容は上書きされます。よろしいですか？`
@@ -514,8 +732,10 @@ export default function App() {
     if (!ok) return;
     setYears(prev => {
       const base = prev[activeYear];
-      const next = prev.map((y, i) => (i <= activeYear ? y : cloneFutureYear(base, i - activeYear)));
-      return revenueGrowthRate !== 1.0 ? applyGrowthRate(revenueGrowthRate, next) : next;
+      const next = prev.map((y, i) => (i <= activeYear || i > n ? y : cloneFutureYear(base, i - activeYear)));
+      if (revenueGrowthRate === 1.0) return next;
+      const grown = applyGrowthRate(revenueGrowthRate, next);
+      return grown.map((year, index) => (index > n ? next[index] : year));
     });
   }
 
@@ -575,6 +795,29 @@ export default function App() {
     setInputMode(mode);
   }
 
+  async function handlePdfFileSelect(file, options = {}) {
+    if (activeYear !== 0) return;
+    const requestId = ++pdfImportRequest.current;
+    setPdfImportState({ status: 'reading', fileName: file.name });
+    try {
+      const result = await extractKeishinPdf(file, options);
+      if (requestId !== pdfImportRequest.current) return;
+      setPdfImportState({ status: 'ready', fileName: file.name, result, requestId });
+    } catch (error) {
+      if (requestId !== pdfImportRequest.current) return;
+      setPdfImportState({ status: 'error', fileName: file.name, error: error.message });
+    }
+  }
+
+  function handlePdfImportApply(result, confirmation = {}) {
+    if (activeYear !== 0 || !result || pdfImportState.requestId !== pdfImportRequest.current) return;
+    setYears(prev => prev.map((year, index) => index === activeYear
+      ? applyFinancialImport(mergeKeishinImportPatch(year, result.patch), result, confirmation) : year));
+    setInputMode('manual');
+    setYModel('full');
+    setPdfImportState(prev => ({ ...prev, status: 'applied' }));
+  }
+
   const targetRankLabel = targetP >= RANK_THRESHOLDS.A
     ? 'A'
     : targetP >= RANK_THRESHOLDS.B
@@ -584,8 +827,9 @@ export default function App() {
         : 'D';
 
   return (
-    <div style={{ maxWidth: 980, margin: '0 auto', padding: 14, background: '#f0f2f8', minHeight: '100vh' }}>
+    <div className="simulator-app">
       <div
+        className="simulator-header"
         style={{
           background: 'linear-gradient(135deg, #1a237e, #283593)',
           color: 'white',
@@ -594,14 +838,13 @@ export default function App() {
           boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'nowrap' }}>
+        <div className="simulator-header-row" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'nowrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap', minWidth: 0 }}>
-            <h1 style={{ fontSize: 15, fontWeight: 'bold', letterSpacing: 0.5, whiteSpace: 'nowrap' }}>
-              経審スコアシミュレーター
-            </h1>
+            <h1 className="simulator-title">経審スコアシミュレーター</h1>
             <button
               type="button"
               onClick={() => setShowSettings(prev => !prev)}
+              autoFocus={initialShowSettings}
               title="初期設定"
               style={{
                 fontSize: 11,
@@ -617,18 +860,18 @@ export default function App() {
             >
               {showSettings ? '▲' : '⚙'} 初期設定
             </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <div className="simulator-header-score" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: 10, opacity: 0.7 }}>現在</span>
               <RankBadge rank={currentScore.rank} size="md" />
-              <span style={{ fontSize: 14, fontWeight: 'bold' }}>{currentScore.p}</span>
+              <span style={{ fontSize: 14, fontWeight: 'bold' }}>{currentScore.p ?? '—'}</span>
             </div>
-            <span style={{ fontSize: 14, opacity: 0.5 }}>&rarr;</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span className="simulator-header-score" style={{ fontSize: 14, opacity: 0.5 }}>&rarr;</span>
+            <div className="simulator-header-score" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
               <span style={{ fontSize: 10, opacity: 0.7 }}>{n}年後</span>
               <RankBadge rank={latestScore.rank} size="md" />
-              <span style={{ fontSize: 14, fontWeight: 'bold' }}>{latestScore.p}</span>
+              <span style={{ fontSize: 14, fontWeight: 'bold' }}>{latestScore.p ?? '—'}</span>
             </div>
-            <div
+            <div className="simulator-header-target"
               style={{
                 background: targetMet ? 'rgba(76,175,80,0.25)' : 'rgba(255,152,0,0.25)',
                 color: targetMet ? '#A5D6A7' : '#FFCC80',
@@ -642,10 +885,10 @@ export default function App() {
             >
               {targetMet
                 ? `目標達成`
-                : `目標まで あと${gap}点`}
+                : `目標まで あと${gap ?? '—'}点`}
             </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
+          <div className="simulator-header-actions" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'nowrap' }}>
             <select
               value={activeScenarioId || ''}
               onChange={e => handleLoadScenario(e.target.value || null)}
@@ -693,20 +936,22 @@ export default function App() {
       </div>
 
       <div
+        className="simulator-settings"
         style={{
           background: '#e8eaf6',
-          border: showSettings ? '1.5px solid #9fa8da' : 'none',
-          borderTop: 'none',
+          borderStyle: showSettings ? 'solid' : 'none',
+          borderColor: '#9fa8da',
+          borderWidth: showSettings ? '0 1.5px 1.5px' : 0,
           borderRadius: '0 0 10px 10px',
           padding: showSettings ? '14px 20px 16px' : '0 20px',
           marginBottom: showSettings ? 14 : 0,
-          overflow: 'hidden',
+          overflow: showSettings ? 'auto' : 'hidden',
           transition: 'padding 0.2s ease, margin 0.2s ease',
         }}
       >
-        <div style={{
+        <div className="simulator-settings-inner" style={{
           maxHeight: showSettings ? 500 : 0,
-          overflow: 'hidden',
+          overflow: showSettings ? 'auto' : 'hidden',
           transition: 'max-height 0.3s ease',
         }}>
 
@@ -917,97 +1162,157 @@ export default function App() {
         </div>
       </div>
 
-      <PScoreChart scores={scores} n={n} targetRank={targetRank} targetP={targetP} />
-
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 6,
-          padding: '0 4px',
-          gap: 8,
-          flexWrap: 'wrap',
-        }}
-      >
-        <span style={{ fontSize: 11, color: '#666' }}>
-          年別シミュレーション（編集中の年を起点に、それ以降の年へコピーできます）
-        </span>
-        <button
-          type="button"
-          onClick={handlePropagateCurrent}
-          disabled={years.length <= activeYear + 1}
-          style={{
-            padding: '6px 14px',
-            fontSize: 11,
-            fontWeight: 'bold',
-            color: years.length <= activeYear + 1 ? '#999' : 'white',
-            background: years.length <= activeYear + 1 ? '#e0e0e0' : '#3949ab',
-            border: 'none',
-            borderRadius: 6,
-            cursor: years.length <= activeYear + 1 ? 'not-allowed' : 'pointer',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          ▶ 「{activeYear === 0 ? '現在' : `${activeYear}年後`}」のデータを以降の年にコピー
-        </button>
+      <div className="simulator-year-navigation">
+        <label className="simulator-period-control">
+          <span>計画期間</span>
+          <select value={n} onChange={e => handleNChange(Number(e.target.value))} aria-label="計画期間">
+            {YEAR_OPTIONS.map(value => <option key={value} value={value}>{value}年後</option>)}
+          </select>
+        </label>
+        <label className="simulator-active-year-control">
+          <span>編集中</span>
+          <select value={activeYear} onChange={e => setActiveYear(Number(e.target.value))} aria-label="編集中の年">
+            {scores.map((score, index) => <option key={index} value={index}>{index === 0 ? '現在' : `${index}年後`}（{score.p ?? '—'}点）</option>)}
+          </select>
+        </label>
+        <span className="simulator-period-help">1〜10年後を選択できます。各年の点数と変更状態を確認できます。</span>
       </div>
-
-      <div style={{ display: 'flex', gap: 4, marginBottom: 0 }}>
+      <div className="simulator-year-strip" role="tablist" aria-label="編集する期間">
         {scores.map((s, i) => (
           <button
             key={i}
+            role="tab"
+            aria-selected={activeYear === i}
             onClick={() => setActiveYear(i)}
-            style={{
-              flex: 1,
-              padding: '10px 6px',
-              border: 'none',
-              cursor: 'pointer',
-              borderRadius: '8px 8px 0 0',
-              fontSize: 13,
-              background: activeYear === i ? 'white' : '#dde1ee',
-              fontWeight: activeYear === i ? 'bold' : 'normal',
-              boxShadow: activeYear === i ? '0 -1px 4px rgba(0,0,0,0.08)' : 'none',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 3,
-              transition: 'background 0.15s',
-            }}
+            className={`simulator-year-tab ${activeYear === i ? 'is-active' : ''}`}
           >
             <span>{i === 0 ? '現在' : `${i}年後`}</span>
-            <RankBadge rank={s.rank} />
-            <span style={{ fontSize: 11, color: '#666' }}>{s.p}点</span>
+            <span className="simulator-year-tab-score">{s.p ?? '—'}点</span>
+            <span className="simulator-year-tab-meta">
+              <RankBadge rank={s.rank} />
+              {yearsDiffer(years[i], baselineYears[i]) && <span className="simulator-change-dot" title="基準から変更あり" aria-label="基準から変更あり">●</span>}
+            </span>
           </button>
         ))}
       </div>
 
-      <div
-        style={{
-          background: 'white',
-          borderRadius: '0 0 10px 10px',
-          boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
-          overflow: 'hidden',
-          marginBottom: 20,
-        }}
-      >
-        <YearPanel
-          yearData={years[activeYear]}
-          score={scores[activeYear]}
-          yModel={yModel}
-          inputMode={inputMode}
-          onSliderChange={(key, val) => handleSliderChange(activeYear, key, val)}
-          onZInputChange={(key, val) => handleZInputChange(activeYear, key, val)}
-          onWInputChange={(path, val) => handleWInputChange(activeYear, path, val)}
-          onWOverrideChange={partial => handleWOverrideChange(activeYear, partial)}
-          onAvgRevenueOverrideChange={partial => handleAvgRevenueOverrideChange(activeYear, partial)}
-          onFinancialDocChange={partial => handleFinancialDocChange(activeYear, partial)}
-          onMultiSliderChange={updates => handleMultiSliderChange(activeYear, updates)}
-        />
+      <div className="simulator-layout">
+        <aside className="simulator-results" aria-label="点数結果">
+          <div className="simulator-result-heading">
+            <div>
+              <span className="simulator-eyebrow">選択中の期間</span>
+              <strong>{activeYear === 0 ? '現在' : `${activeYear}年後`}</strong>
+            </div>
+            <div className="simulator-result-p">
+              <span>
+                P点 {selectedPLabel}
+              </span>
+              <strong>{selectedScore?.p ?? '未算定'}</strong>
+              {selectedPDelta != null && <em className={selectedPDelta >= 0 ? 'is-positive' : 'is-negative'}>{selectedPDelta >= 0 ? '+' : ''}{selectedPDelta} 基準差</em>}
+            </div>
+          </div>
+          <PScoreChart
+            scores={scores}
+            baselineScores={baselineScores}
+            activeYear={activeYear}
+            onSelectYear={setActiveYear}
+            targetRank={targetRank}
+            targetP={targetP}
+          />
+          <a
+            className="simulator-manual-link"
+            href={`${import.meta.env.BASE_URL}manual.html`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            操作マニュアル（新しいタブで開く）
+          </a>
+          <div className="simulator-manual-actions">
+            <div>
+              <strong>年別シミュレーション</strong>
+              <span>編集中の年を起点に、それ以降の年へコピーできます。</span>
+            </div>
+            <button
+              type="button"
+              onClick={handlePropagateCurrent}
+              disabled={activeYear >= n}
+            >
+              ▶ 「{activeYear === 0 ? '現在' : `${activeYear}年後`}」を以降の年にコピー
+            </button>
+          </div>
+        </aside>
+
+        <section className="simulator-editor" aria-label="入力エディター">
+          <div className="simulator-editor-heading">
+            <div>
+              <span className="simulator-eyebrow">編集エリア</span>
+              <strong>{activeYear === 0 ? '現在' : `${activeYear}年後`}の入力</strong>
+            </div>
+            <span>右側だけスクロールします</span>
+          </div>
+          <div className="simulator-editor-category-tabs" role="tablist" aria-label="入力カテゴリ">
+            {[
+              { key: 'revenue', label: '工事高・売上高', color: '#1565C0', sub: `X1 ${selectedScore.x1}` },
+              { key: 'tech', label: '技術力 Z', color: '#6A1B9A', sub: `${selectedScore.z}点` },
+              { key: 'finance', label: '財務 Y・X2', color: '#2E7D32', sub: `Y${selectedScore.y ?? '—'}/X2${selectedScore.x2 ?? '—'}` },
+              { key: 'social', label: '社会性 W', color: '#E65100', sub: `${selectedScore.w}点` },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={activeCategory === tab.key}
+                onClick={() => setActiveCategory(tab.key)}
+                style={{
+                  background: activeCategory === tab.key ? tab.color : 'white',
+                  color: activeCategory === tab.key ? 'white' : tab.color,
+                  border: `1.5px solid ${tab.color}`,
+                }}
+              >
+                {tab.label}<span>{tab.sub}</span>
+              </button>
+            ))}
+          </div>
+          <div className="simulator-editor-scroll">
+            {activeYear === 0 && <details className="simulator-secondary" open={pdfImportState.status !== 'idle'}>
+              <summary>PDF取込（現在のみ）</summary>
+              <KeishinPdfImport
+                activeYear={activeYear}
+                currentYear={years[activeYear]}
+                importState={pdfImportState}
+                onFileSelect={handlePdfFileSelect}
+                onApply={handlePdfImportApply}
+                onDismiss={() => setPdfImportState({ status: 'idle' })}
+              />
+            </details>}
+            <details className="simulator-secondary">
+              <summary>財務の詳細計算と実績照合</summary>
+              <AccuracyPanel year={years[activeYear]} score={scores[activeYear]}
+                onDetailed={() => setYModel('full')}
+                onChange={nextYear => setYears(prev => prev.map((y, i) => i === activeYear ? nextYear : y))} />
+            </details>
+            <YearPanel
+              yearData={years[activeYear]}
+              score={scores[activeYear]}
+              yModel={yModel}
+              inputMode={inputMode}
+              activeCategory={activeCategory}
+              hideInternalTabs
+              onActiveCategoryChange={setActiveCategory}
+              onSliderChange={(key, val) => handleSliderChange(activeYear, key, val)}
+              onZInputChange={(key, val) => handleZInputChange(activeYear, key, val)}
+              onWInputChange={(path, val) => handleWInputChange(activeYear, path, val)}
+              onWOverrideChange={partial => handleWOverrideChange(activeYear, partial)}
+              onAvgRevenueOverrideChange={partial => handleAvgRevenueOverrideChange(activeYear, partial)}
+              onFinancialDocChange={partial => handleFinancialDocChange(activeYear, partial)}
+              onMultiSliderChange={updates => handleMultiSliderChange(activeYear, updates)}
+            />
+          </div>
+        </section>
       </div>
 
       <p style={{ textAlign: 'center', fontSize: 11, color: '#aaa', paddingBottom: 16 }}>
-        ※ 計算式は簡易近似です。実際の経審評点は審査機関の算定によります。
+        ※ 詳細計算・参考推計・旧方式を区別して表示します。実績照合の対象条件は照合欄をご確認ください。
       </p>
     </div>
   );

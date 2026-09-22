@@ -1,0 +1,64 @@
+.first-visit {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 14px;
+  min-height: 100vh;
+  box-sizing: border-box;
+  background: #f0f2f8;
+  color: #25324c;
+  font-family: "Yu Gothic", Meiryo, sans-serif;
+  line-height: 1.8;
+}
+.first-visit * { box-sizing: border-box; }
+.first-visit-header {
+  padding: 16px 22px;
+  border-radius: 10px 10px 0 0;
+  background: linear-gradient(120deg, #1a237e, #283593);
+  color: white;
+  font-size: 15px;
+  font-weight: bold;
+}
+.first-visit-paper {
+  margin: 24px;
+  padding: 28px;
+  border: 1px solid #dae1ef;
+  border-radius: 12px;
+  background: white;
+}
+.first-visit p { margin: 8px 0; color: #56637b; font-size: 14px; }
+.first-visit .first-visit-eyebrow { font-size: 12px; letter-spacing: .05em; }
+.first-visit h1 { font-size: 24px; line-height: 1.5; margin: 0 0 12px; }
+.first-visit h2 { font-size: 15px; margin: 0; }
+.first-visit-points { list-style: none; padding: 0; margin: 24px 0; counter-reset: guide-point; }
+.first-visit-points > li { position: relative; padding-left: 44px; margin: 20px 0; counter-increment: guide-point; }
+.first-visit-points > li::before {
+  content: counter(guide-point);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 30px;
+  height: 30px;
+  text-align: center;
+  line-height: 30px;
+  background: #edf1fc;
+  border-radius: 50%;
+}
+.first-visit-points p { margin: 3px 0 0; }
+.first-visit details { border-top: 1px solid #dae1ef; padding: 14px 0; font-size: 14px; }
+.first-visit summary { cursor: pointer; padding: 4px 0; }
+.first-visit details ol { padding-left: 24px; color: #56637b; }
+.first-visit-manual { display: inline-block; padding: 8px 0; color: #283593; font-size: 14px; }
+.first-visit-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid #dae1ef; padding-top: 20px; margin-top: 16px; }
+.first-visit-footer p { font-size: 12px; margin: 0; }
+.first-visit-footer button { cursor: pointer; font: inherit; font-size: 14px; padding: 13px 20px; border: 0; border-radius: 8px; background: #3949ab; color: white; }
+.first-visit-footer button:hover { background: #283593; }
+.first-visit-storage-notice { max-width: 952px; margin: 12px auto; padding: 12px; background: #fff8e9; color: #624711; font: 14px/1.8 sans-serif; }
+@media (max-width: 540px) {
+  .first-visit { padding: 10px; }
+  .first-visit-paper { margin: 12px 0; padding: 20px; }
+  .first-visit h1 { font-size: 21px; }
+  .first-visit-footer { flex-direction: column; align-items: stretch; }
+}
+@media (pointer: coarse) {
+  .first-visit summary, .first-visit-manual { min-height: 44px; }
+}

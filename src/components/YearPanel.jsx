@@ -9,6 +9,7 @@ import {
   W_LEGAL_ACTION_OPTIONS,
   W_REHABILITATION_OPTIONS,
   W_WORK_LIFE_BALANCE_OPTIONS,
+  Y_DETAIL_FIELD_LABELS,
   Z_TECHNICAL_ROLE_FIELDS,
 } from '../utils/calculations';
 
@@ -461,15 +462,15 @@ function FinancialDocPanel({ doc = {}, onDocChange, onApply, yModel = 'simple' }
     : null;
 
   const updates = {};
-  if (profitRate !== null) updates.profitRate = Math.round(profitRate * 10000) / 10000;
-  if (grossProfitRate !== null) updates.grossProfitRate = Math.round(grossProfitRate * 10000) / 10000;
-  if (equityResult !== null) updates.equity = Math.round(equityResult);
-  if (totalDebt !== null) updates.debt = Math.round(totalDebt);
-  if (fixedAssets !== null) updates.fixedAssets = Math.round(fixedAssets);
-  if (retainedEarnings !== null) updates.retainedEarnings = Math.round(retainedEarnings);
-  if (interest !== null) updates.interest = Math.round(interest);
-  if (cfResult !== null) updates.operatingCF = Math.round(cfResult);
-  if (avgProfitResult !== null) updates.avgProfit = Math.round(avgProfitResult);
+  if (profitRate !== null) updates.profitRate = profitRate;
+  if (grossProfitRate !== null) updates.grossProfitRate = grossProfitRate;
+  if (equityResult !== null) updates.equity = equityResult;
+  if (totalDebt !== null) updates.debt = totalDebt;
+  if (fixedAssets !== null) updates.fixedAssets = fixedAssets;
+  if (retainedEarnings !== null) updates.retainedEarnings = retainedEarnings;
+  if (interest !== null) updates.interest = interest;
+  if (cfResult !== null) updates.operatingCF = cfResult;
+  if (avgProfitResult !== null) updates.avgProfit = avgProfitResult;
 
   const hasUpdates = Object.keys(updates).length > 0;
 
@@ -931,6 +932,9 @@ export default function YearPanel({
   score,
   yModel = 'simple',
   inputMode = 'auto',
+  activeCategory = 'revenue',
+  hideInternalTabs = false,
+  onActiveCategoryChange,
   onSliderChange,
   onZInputChange,
   onWInputChange,
@@ -940,7 +944,7 @@ export default function YearPanel({
   onMultiSliderChange,
 }) {
   const [inputUiMode, setInputUiMode] = useState('simple');
-  const [activeTab, setActiveTab] = useState('revenue');
+  const activeTab = activeCategory;
   const monthlyBids = getMonthlyBids(yearData.staff, yearData.bidsPerStaff);
   const constructionBidRatio = Math.max(0, Math.min(1, Number(yearData.constructionBidRatio ?? 1)));
   const otherWinRate = Math.max(0, Math.min(1, Number(yearData.otherWinRate ?? yearData.winRate ?? 0)));
@@ -987,6 +991,14 @@ export default function YearPanel({
   const wDetail = score.wDetail || { rawTotal: 0, sections: {} };
   const wSections = wDetail.sections || {};
   const wProgress = Math.max(0, Math.min(100, (Math.max(0, wDetail.rawTotal) / 237) * 100));
+  const yDetail = score.yDetail || {
+    requestedModel: yModel,
+    appliedModel: 'simple',
+    missingFields: [],
+    inputs: {},
+  };
+  const missingYLabels = (yDetail.missingFields || []).map(key => Y_DETAIL_FIELD_LABELS[key] || key);
+  const isYFallbackToSimple = yDetail.requestedModel === 'full' && yDetail.appliedModel !== 'full';
 
   const wQuickCount = [
     welfare.kentaikyo,
@@ -1062,7 +1074,7 @@ export default function YearPanel({
           {[['X1', score.x1], ['X2', score.x2], ['Y', score.y], ['Z', score.z], ['W', score.w]].map(([label, val]) => (
             <div key={label} style={{ textAlign: 'center' }}>
               <div style={{ fontSize: 10, color: '#888' }}>{label}点</div>
-              <div style={{ fontSize: 14, fontWeight: 'bold', color: '#555' }}>{val}</div>
+              <div style={{ fontSize: 14, fontWeight: 'bold', color: '#555' }}>{val ?? '—'}</div>
             </div>
           ))}
         </div>
@@ -1074,7 +1086,8 @@ export default function YearPanel({
           background: '#f5f6fa',
         }}
       >
-        <div
+        {!hideInternalTabs && <div
+          className="simulator-category-tabs"
           style={{
             display: 'flex',
             gap: 4,
@@ -1086,13 +1099,15 @@ export default function YearPanel({
           {[
             { key: 'revenue', label: '工事高・売上高', color: '#1565C0', sub: `X1 ${score.x1}` },
             { key: 'tech', label: `技術力 Z`, color: '#6A1B9A', sub: `${score.z}点` },
-            { key: 'finance', label: `財務 Y・X2`, color: '#2E7D32', sub: `Y${score.y}/X2${score.x2}` },
+            { key: 'finance', label: `財務 Y・X2`, color: '#2E7D32', sub: `Y${score.y ?? '—'}/X2${score.x2 ?? '—'}` },
             { key: 'social', label: `社会性 W`, color: '#E65100', sub: `${score.w}点` },
           ].map(tab => (
             <button
               key={tab.key}
               type="button"
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => onActiveCategoryChange?.(tab.key)}
+              role="tab"
+              aria-selected={activeTab === tab.key}
               style={{
                 background: activeTab === tab.key ? tab.color : 'white',
                 color: activeTab === tab.key ? 'white' : tab.color,
@@ -1113,7 +1128,7 @@ export default function YearPanel({
               <span style={{ fontSize: 10, opacity: 0.85, fontWeight: 'normal' }}>{tab.sub}</span>
             </button>
           ))}
-        </div>
+        </div>}
 
         <div style={{ display: activeTab === 'revenue' ? 'block' : 'none' }}>
         {inputMode === 'manual' ? (
@@ -1134,20 +1149,22 @@ export default function YearPanel({
                   onChange={e => onAvgRevenueOverrideChange?.({ enabled: e.target.checked })}
                 />
                 <span style={{ fontWeight: 'bold', color: '#1565C0' }}>
-                  経審準拠の3年平均値を直接入力する（X1点・Z2点で使用）
+                  経審の平均値を直接入力する（X1点・Z2点で使用）
                 </span>
               </label>
+              <SimpleSelectRow label="通知書の平均期間" value={yearData.avgMethod}
+                onChange={value => onSliderChange('avgMethod', value)} options={AVERAGE_METHOD_OPTIONS} />
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 8 }}>
                 <label style={{ display: 'grid', gap: 4, fontSize: 11, color: avgRevenueOverrideEnabled ? '#1565C0' : '#999' }}>
-                  3年平均 完成工事高（万円）
+                  {yearData.avgMethod === '2year' ? '2年平均' : '3年平均'} 完成工事高（万円）
                   <input
                     type="number"
                     min={0}
-                    step={100}
-                    value={avgRevenueOverride.completionRevenue || ''}
+                    step="any"
+                    value={avgRevenueOverride.completionRevenue ?? ''}
                     disabled={!avgRevenueOverrideEnabled}
                     onChange={e => onAvgRevenueOverrideChange?.({
-                      completionRevenue: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      completionRevenue: e.target.value === '' ? null : Math.max(0, Number(e.target.value)),
                     })}
                     style={{
                       padding: '6px 8px',
@@ -1161,15 +1178,15 @@ export default function YearPanel({
                   />
                 </label>
                 <label style={{ display: 'grid', gap: 4, fontSize: 11, color: avgRevenueOverrideEnabled ? '#1565C0' : '#999' }}>
-                  3年平均 元請完成工事高（万円）
+                  {yearData.avgMethod === '2year' ? '2年平均' : '3年平均'} 元請完成工事高（万円）
                   <input
                     type="number"
                     min={0}
-                    step={100}
-                    value={avgRevenueOverride.principalRevenue || ''}
+                    step="any"
+                    value={avgRevenueOverride.principalRevenue ?? ''}
                     disabled={!avgRevenueOverrideEnabled}
                     onChange={e => onAvgRevenueOverrideChange?.({
-                      principalRevenue: Math.max(0, Math.floor(Number(e.target.value) || 0)),
+                      principalRevenue: e.target.value === '' ? null : Math.max(0, Number(e.target.value)),
                     })}
                     style={{
                       padding: '6px 8px',
@@ -1186,7 +1203,7 @@ export default function YearPanel({
               <div style={{ fontSize: 10, color: '#666', marginTop: 6, lineHeight: 1.5 }}>
                 {avgRevenueOverrideEnabled
                   ? '※ 下の「完成工事高」「元請完成工事高」スライダーは Y点・売上構成の参考用となり、X1・Z2点には使われません。'
-                  : '※ 経審通知書の「3年平均」値（千円→万円換算）を入れたい場合にONにします。'}
+                  : '※ 経審通知書の2年・3年平均値を万円に換算して入力します。0円も反映されます。空欄は当期入力から計算します。'}
               </div>
             </div>
 
@@ -1246,7 +1263,7 @@ export default function YearPanel({
                 lineHeight: 1.7,
               }}
             >
-              完成工事高は X1、元請完成工事高は Z2、売上高は Y点にそれぞれ別で使います。
+              完成工事高は X1、元請完成工事高は Z2 に使います。新しい詳細Yでは「財務の詳細計算と実績照合」の売上高を使用します。
             </div>
           </SectionCard>
         ) : (
@@ -1381,7 +1398,7 @@ export default function YearPanel({
                     lineHeight: 1.7,
                   }}
                 >
-                  自動モードでは、工事分だけを完成工事高(X1)に反映し、売上高(Y点)は工事と役務・物販を合計して推計します。
+                  自動モードでは工事分を完成工事高(X1)に反映し、工事と役務・物販の合計売上を推計します。新しい詳細Yの財務入力は自動更新されません。
                 </div>
               </>
             )}
@@ -1422,7 +1439,8 @@ export default function YearPanel({
         </SectionCard>
         </div>
 
-        <div style={{ display: activeTab === 'finance' ? 'block' : 'none' }}>
+        {activeTab === 'finance' && yearData.calculationVersion === 'accuracy-v2' && yModel === 'full' && <p style={{padding:16}}>財務は上の「財務の詳細計算と実績照合」で入力します。<button onClick={() => document.getElementById('accuracy-panel')?.scrollIntoView({behavior:'smooth'})}>財務入力へ移動</button></p>}
+        <div style={{ display: activeTab === 'finance' && (yearData.calculationVersion !== 'accuracy-v2' || yModel === 'simple') ? 'block' : 'none' }}>
         <SectionCard title="財務（Y点・X2点に連動）" accentColor="#2E7D32">
           <FinancialDocPanel
             doc={yearData.financialDoc || {}}
@@ -1490,12 +1508,48 @@ export default function YearPanel({
               unitText="万円/年"
             />
           </div>
+          <div
+            style={{
+              marginTop: 10,
+              paddingTop: 8,
+              borderTop: '1px dashed #c8e6c9',
+              fontSize: 11,
+              lineHeight: 1.7,
+              color: isYFallbackToSimple ? '#C45100' : '#2E7D32',
+            }}
+          >
+            <div style={{ fontWeight: 'bold' }}>
+              {isYFallbackToSimple
+                ? '\u8a73\u7d30Y\u8a08\u7b97\u306b\u5fc5\u8981\u306a\u9805\u76ee\u304c\u8db3\u308a\u306a\u3044\u305f\u3081\u3001\u73fe\u5728\u306f\u7c21\u6613Y\u8a08\u7b97\u3092\u4f7f\u7528\u3057\u3066\u3044\u307e\u3059\u3002'
+                : yDetail.appliedModel === 'full'
+                  ? '\u73fe\u5728\u306f\u8a73\u7d30Y\u8a08\u7b97\u3092\u4f7f\u7528\u3057\u3066\u3044\u307e\u3059\u3002'
+                  : '\u73fe\u5728\u306f\u7c21\u6613Y\u8a08\u7b97\u3092\u4f7f\u7528\u3057\u3066\u3044\u307e\u3059\u3002'}
+            </div>
+            {missingYLabels.length > 0 && (
+              <div>{`\u8db3\u308a\u306a\u3044\u9805\u76ee: ${missingYLabels.join('\u3001')}`}</div>
+            )}
+            <div>
+              {`\u8a08\u7b97\u306b\u4f7f\u7528: \u58f2\u4e0a\u9ad8 ${Number(yDetail.inputs?.revenue || 0).toLocaleString()} / \u7d4c\u5e38\u5229\u76ca\u7387 ${(Number(yDetail.inputs?.profitRate || 0) * 100).toFixed(1)}% / \u81ea\u5df1\u8cc7\u672c ${Number(yDetail.inputs?.equity || 0).toLocaleString()} / \u8ca0\u50b5 ${Number(yDetail.inputs?.debt || 0).toLocaleString()} / \u652f\u6255\u5229\u606f ${Number(yDetail.inputs?.interest || 0).toLocaleString()}`}
+            </div>
+          </div>
         </SectionCard>
 
         {yModel === 'full' && (
           <SectionCard title="Y点 詳細入力（追加4項目）" accentColor="#00796B">
             <div style={{ fontSize: 11, color: '#555', marginBottom: 10, lineHeight: 1.6 }}>
               詳細モデルでは、財務の基本4項目に加えて、残り4項目もここで入力します。
+            </div>
+            <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+              {[
+                ['interestIncome', '受取利息配当金（万円）'],
+                ['previousTotalCapital', '前期総資本（万円・空欄なら当期のみ）'],
+              ].map(([key, label]) => (
+                <label key={key} style={{ display: 'grid', gap: 4, fontSize: 12 }}>
+                  {label}
+                  <input type="number" min="0" step="any" value={yearData[key] ?? ''}
+                    onChange={event => onSliderChange(key, event.target.value === '' ? null : Math.max(0, Number(event.target.value)))} />
+                </label>
+              ))}
             </div>
             <div style={{ display: 'grid', gap: 4 }}>
               <SliderRow

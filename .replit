@@ -1,0 +1,14 @@
+run = "npm run dev"
+modules = ["nodejs-22"]
+
+[env]
+PORT = "5173"
+
+[deployment]
+build = ["sh", "-c", "npm run build"]
+run = ["sh", "-c", "npm start"]
+deploymentTarget = "autoscale"
+
+[[ports]]
+localPort = 5173
+externalPort = 80

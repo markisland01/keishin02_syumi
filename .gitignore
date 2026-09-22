@@ -1,2 +1,12 @@
 node_modules
 dist
+.env
+.env.*
+!.env.example
+
+tmp/
+output/
+.claude/
+*.broken.backup.js
+.playwright-cli/
+*.log

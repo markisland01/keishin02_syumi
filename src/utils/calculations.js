@@ -1,3 +1,4 @@
+import { calculateDetailedY, financialX2, createFinancialData } from './financialCalculations.js';
 // ===== デフォルト値（売上約1億円規模の建設会社） =====
 export const DEFAULT_YEAR_DATA = {
   staff: 2,               // 在宅スタッフ数（名）
@@ -12,6 +13,8 @@ export const DEFAULT_YEAR_DATA = {
   equity: 3000,           // 自己資本（万円）
   debt: 4000,             // 負債総額（万円）= 流動負債＋固定負債
   interest: 80,           // 支払利息（万円/年）
+  interestIncome: 0,      // 受取利息配当金（万円/年）
+  previousTotalCapital: null, // 前期総資本（万円）。未入力なら当期のみ
   avgProfit: 300,         // 平均利益（万円/年）
   // --- 詳細版(8指標)用の追加入力 ---
   grossProfitRate: 0.15,  // 売上総利益率（粗利率）※建設業15%前後
@@ -53,8 +56,8 @@ export const DEFAULT_YEAR_DATA = {
   // X1点・Z2点用に直接「3年平均完成工事高」「3年平均元請完成工事高」を指定
   avgRevenueOverride: {
     enabled: false,
-    completionRevenue: 0,   // 3年平均完成工事高（万円）→ X1
-    principalRevenue: 0,    // 3年平均元請完成工事高（万円）→ Z2
+    completionRevenue: null, // 未入力と0円を区別する
+    principalRevenue: null,
   },
   financialDoc: {
     unit: 'man',
@@ -118,6 +121,17 @@ export const DEFAULT_YEAR_DATA = {
       ecoAction21: false,
     },
   },
+  scoreOverrides: {
+    w: null,
+  },
+  providedInputs: {
+    detailedY: {
+      grossProfitRate: false,
+      fixedAssets: false,
+      operatingCF: false,
+      retainedEarnings: false,
+    },
+  },
 };
 
 export const RANK_THRESHOLDS = { A: 900, B: 800, C: 700 };
@@ -135,6 +149,15 @@ export const INDUSTRY_OPTIONS = [
   '板金', 'ガラス', '塗装', '防水', '内装仕上', '機械器具設置', '熱絶縁', '電気通信',
   '造園', 'さく井', '建具', '水道施設', '消防施設', '清掃施設', '解体',
 ];
+
+export const Y_DETAIL_FIELD_KEYS = ['grossProfitRate', 'fixedAssets', 'operatingCF', 'retainedEarnings'];
+
+export const Y_DETAIL_FIELD_LABELS = {
+  grossProfitRate: '\u58f2\u4e0a\u7dcf\u5229\u76ca\u7387',
+  fixedAssets: '\u56fa\u5b9a\u8cc7\u7523',
+  operatingCF: '\u55b6\u696d\u30ad\u30e3\u30c3\u30b7\u30e5\u30d5\u30ed\u30fc',
+  retainedEarnings: '\u5229\u76ca\u5270\u4f59\u91d1',
+};
 
 export const Z_TECHNICAL_ROLE_FIELDS = [
   { key: 'level1WithCertificate', label: '監理資格者証ありの1級', points: 6 },
@@ -486,16 +509,21 @@ const Y_INDICATORS = [
 export function calcYFull({
   revenue, profitRate, equity, debt, interest,
   grossProfitRate, fixedAssets, operatingCF, retainedEarnings,
+  interestIncome = 0, previousTotalCapital = null,
 }) {
   if (revenue <= 0) return 583;
   const totalCap = equity + debt;
   const grossProfit = revenue * grossProfitRate;
+  // CIIC: https://www.ciic.or.jp/wp-content/uploads/2016/01/shihyou_y.pdf
+  // Gross profit uses two-period average capital (minimum 3,000万円).
+  const hasPrevious = previousTotalCapital != null && previousTotalCapital !== '' && Number.isFinite(Number(previousTotalCapital));
+  const averageCapital = Math.max(3000, hasPrevious ? (totalCap + Number(previousTotalCapital)) / 2 : totalCap);
 
   // 8指標の算定値
   const values = [
-    (interest / revenue) * 100,                                    // x1: 純支払利息比率(%)
+    ((interest - Number(interestIncome || 0)) / revenue) * 100,      // x1: 純支払利息比率(%)
     debt / (revenue / 12),                                         // x2: 負債回転期間(月)
-    totalCap > 0 ? (grossProfit / totalCap) * 100 : 0,             // x3: 総資本売上総利益率(%)
+    (grossProfit / averageCapital) * 100,                          // x3: 総資本売上総利益率(%)
     profitRate * 100,                                              // x4: 売上高経常利益率(%)
     fixedAssets > 0 ? (equity / fixedAssets) * 100 : 350,          // x5: 自己資本対固定資産比率(%)
     totalCap > 0 ? (equity / totalCap) * 100 : 0,                 // x6: 自己資本比率(%)
@@ -509,10 +537,12 @@ export function calcYFull({
     const { coeff, upper, lower } = Y_INDICATORS[i];
     const lo = Math.min(upper, lower);
     const hi = Math.max(upper, lower);
-    const clamped = Math.max(lo, Math.min(hi, values[i]));
+    const rounded = Math.sign(values[i]) * Math.round(Math.abs(values[i]) * 1000) / 1000;
+    const clamped = Math.max(lo, Math.min(hi, rounded));
     A += coeff * clamped;
   }
 
+  A = Math.sign(A) * Math.round(Math.abs(A) * 100) / 100;
   const y = 167.3 * A + 583;
   return Math.round(Math.max(0, Math.min(1595, y)));
 }
@@ -716,6 +746,49 @@ function cloneWInput(source = DEFAULT_YEAR_DATA.wInput) {
   };
 }
 
+function cloneScoreOverrides(source = DEFAULT_YEAR_DATA.scoreOverrides) {
+  return {
+    w: source?.w != null && source.w !== '' && Number.isFinite(Number(source.w)) ? Math.round(Number(source.w)) : null,
+  };
+}
+
+function cloneProvidedInputs(source = DEFAULT_YEAR_DATA.providedInputs) {
+  const base = DEFAULT_YEAR_DATA.providedInputs;
+  return {
+    detailedY: {
+      ...base.detailedY,
+      ...(source?.detailedY || {}),
+    },
+  };
+}
+
+export function getMissingDetailedYInputKeys(yearData = {}) {
+  const providedInputs = cloneProvidedInputs(yearData?.providedInputs);
+  return Y_DETAIL_FIELD_KEYS.filter(key => !providedInputs.detailedY[key]);
+}
+
+// Older saves predate input flags. Preserve their populated values, including 0.
+export function migrateSavedYears(years) {
+  return years.map(year => {
+    if (year.providedInputs?.detailedY != null) return year.calculationVersion ? year : { ...year, calculationVersion: 'legacy-v1' };
+    return {
+      ...year,
+      calculationVersion: year.calculationVersion || 'legacy-v1',
+      providedInputs: {
+        ...year.providedInputs,
+        detailedY: Object.fromEntries(Y_DETAIL_FIELD_KEYS.map(key => [
+          key,
+          year[key] != null && String(year[key]).trim() !== '' && Number.isFinite(Number(year[key])),
+        ])),
+      },
+    };
+  });
+}
+
+export function hasCompleteDetailedYInputs(yearData = {}) {
+  return getMissingDetailedYInputKeys(yearData).length === 0;
+}
+
 function legacyWItemsToWInput(wItems = {}) {
   const base = cloneWInput();
   const hasKey = key => Object.prototype.hasOwnProperty.call(wItems, key);
@@ -869,6 +942,7 @@ export function calcP(x1, x2, y, z, w) {
 
 // ランク判定
 export function getRank(p, thresholds = RANK_THRESHOLDS) {
+  if (p == null || !Number.isFinite(p)) return '—';
   if (p >= thresholds.A) return 'A';
   if (p >= thresholds.B) return 'B';
   if (p >= thresholds.C) return 'C';
@@ -879,11 +953,10 @@ export function getRank(p, thresholds = RANK_THRESHOLDS) {
 // 完成工事高は前年の実績を引き継いで2〜3年平均を算出
 // yModel: 'simple' = 4指標簡易版, 'full' = 8指標詳細版
 // inputMode: 'auto' = 入札活動から推計, 'manual' = 完成工事高/売上を直接入力
-export function calcAllScores(years, yModel = 'simple', inputMode = 'auto') {
+export function calcAllScoresLegacy(years, yModel = 'simple', inputMode = 'auto') {
   const scores = [];
   const revenueHistory = [];
   const principalRevenueHistory = [];
-  const yFunc = yModel === 'full' ? calcYFull : calcY;
 
   for (const yd of years) {
     const monthlyBids = getMonthlyBids(yd.staff, yd.bidsPerStaff);
@@ -921,21 +994,28 @@ export function calcAllScores(years, yModel = 'simple', inputMode = 'auto') {
     const useAvgOverride = Boolean(avgOverride?.enabled);
     const overrideCompletion = Math.max(0, Number(avgOverride?.completionRevenue) || 0);
     const overridePrincipal = Math.max(0, Number(avgOverride?.principalRevenue) || 0);
-    const avgRevenue = useAvgOverride && overrideCompletion > 0
+    const hasAverage = value => value != null && value !== '' && Number.isFinite(Number(value));
+    const avgRevenue = useAvgOverride && hasAverage(avgOverride?.completionRevenue)
       ? overrideCompletion
       : calcAvgRevenue(all.slice(-3), avgMethod);
-    const avgPrincipalRevenue = useAvgOverride && overridePrincipal > 0
+    const avgPrincipalRevenue = useAvgOverride && hasAverage(avgOverride?.principalRevenue)
       ? overridePrincipal
       : calcAvgRevenue(principalAll.slice(-3), avgMethod);
 
     const x1 = calcX1(avgRevenue);
     const x2 = calcX2(yd.equity, yd.avgProfit);
+    const missingDetailedYInputs = getMissingDetailedYInputKeys(yd);
+    const canUseFullY = missingDetailedYInputs.length === 0;
+    const appliedYModel = yModel === 'full' && canUseFullY ? 'full' : 'simple';
+    const yFunc = appliedYModel === 'full' ? calcYFull : calcY;
     const y = yFunc({
       revenue: revenueForY,
       profitRate: yd.profitRate,
       equity: yd.equity,
       debt: yd.debt,
       interest: yd.interest,
+      interestIncome: yd.interestIncome,
+      previousTotalCapital: yd.previousTotalCapital,
       grossProfitRate: yd.grossProfitRate,
       fixedAssets: yd.fixedAssets,
       operatingCF: yd.operatingCF,
@@ -958,8 +1038,28 @@ export function calcAllScores(years, yModel = 'simple', inputMode = 'auto') {
       avgPrincipalRevenue,
       revenueForY,
       x1, x2, y, z, w, p,
+      yDetail: {
+        requestedModel: yModel,
+        appliedModel: appliedYModel,
+        canUseFull: canUseFullY,
+        missingFields: missingDetailedYInputs,
+        inputs: {
+          revenue: revenueForY,
+          profitRate: yd.profitRate,
+          equity: yd.equity,
+          debt: yd.debt,
+          interest: yd.interest,
+          grossProfitRate: yd.grossProfitRate,
+          fixedAssets: yd.fixedAssets,
+          operatingCF: yd.operatingCF,
+          retainedEarnings: yd.retainedEarnings,
+        },
+      },
       zDetail,
       wDetail,
+      computedW: wDetail.w,
+      wOverridden: wOverrideEnabled,
+      wOverrideValue: wOverrideEnabled ? wOverrideValue : null,
       rank: getRank(p),
       monthlyBids,
     });
@@ -973,11 +1073,33 @@ export function calcAllScores(years, yModel = 'simple', inputMode = 'auto') {
 export function createDefaultYears(n) {
   return Array.from({ length: n + 1 }, () => ({
     ...DEFAULT_YEAR_DATA,
+    calculationVersion: 'accuracy-v2',
+    accuracy: createFinancialData(),
+    referenceAssessments: [],
+    verificationCases: [],
     zInput: cloneZInput(),
     wItems: { ...DEFAULT_YEAR_DATA.wItems },
     wInput: cloneWInput(),
     wOverride: { ...DEFAULT_YEAR_DATA.wOverride },
     avgRevenueOverride: { ...DEFAULT_YEAR_DATA.avgRevenueOverride },
     financialDoc: { ...DEFAULT_YEAR_DATA.financialDoc },
+    scoreOverrides: cloneScoreOverrides(),
+    providedInputs: cloneProvidedInputs(),
   }));
+}
+
+// Accuracy mode never substitutes estimates for missing detailed results.
+export function calcAllScores(years, yModel = 'simple', inputMode = 'auto') {
+  const legacy = calcAllScoresLegacy(years, yModel, inputMode);
+  return legacy.map((s, i) => {
+    const year = years[i];
+    if (year.calculationVersion !== 'accuracy-v2' || yModel !== 'full') return { ...s, computedP: calcP(s.x1,s.x2,s.y,s.z,s.computedW), effectiveP:s.p, referenceP:null };
+    const detail = calculateDetailedY(year.accuracy);
+    const values = financialX2(year.accuracy);
+    const x2 = values.equity == null || values.profit == null ? null : calcX2(values.equity / 10, values.profit / 10);
+    const y = detail.y;
+    const p = x2 == null || y == null ? null : calcP(s.x1,x2,y,s.z,s.w);
+    const computedP = x2 == null || y == null ? null : calcP(s.x1,x2,y,s.z,s.computedW);
+    return { ...s, x2, y, p, computedP, effectiveP:p, rank:getRank(p), yDetail: { ...detail, requestedModel:'full', appliedModel:'full', canUseFull: y != null, x2Inputs: values }, referenceP: year.referenceAssessments?.find(r=>r.id===year.activeReferenceId)?.scores?.p ?? null };
+  });
 }

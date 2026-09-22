@@ -1,15 +1,43 @@
 import { useEffect, useRef, useState } from 'react';
 import { INDUSTRY_OPTIONS } from '../utils/calculations';
 import { FINANCIAL_FIELDS } from '../utils/financialCalculations.js';
+import {
+  clearOcrAccessCode,
+  getOcrAccessCode,
+  getConfiguredOcrApiUrl,
+  setConfiguredOcrApiUrl,
+  setOcrAccessCode,
+} from '../utils/geminiOcrClient.mjs';
 
 function setPath(target, path, value) { const keys=path.split('.'); let node=target; for(const key of keys.slice(0,-1)) node=node[key] ||= {}; node[keys.at(-1)]=value; }
 
 export default function KeishinPdfImport({ activeYear, currentYear, importState, onFileSelect, onApply, onDismiss }) {
   const input=useRef(null);
   const [industry,setIndustry]=useState(currentYear.industry);
+  const [ocrUrl,setOcrUrl]=useState(()=>getConfiguredOcrApiUrl());
+  const [ocrUrlError,setOcrUrlError]=useState('');
+  const [ocrAccessCode,setOcrAccessCodeState]=useState(()=>getOcrAccessCode());
   const [fields,setFields]=useState([]), [context,setContext]=useState({}), [confirmed,setConfirmed]=useState(false);
   const result=importState.result, status=importState.status;
+  const ocrDestination=(()=>{try{return new URL(ocrUrl,typeof window==='undefined'?'http://localhost':window.location.origin);}catch{return null;}})();
+  const ocrIsExternal=Boolean(ocrDestination&&typeof window!=='undefined'&&ocrDestination.origin!==window.location.origin);
   useEffect(()=>setIndustry(currentYear.industry),[activeYear,currentYear.industry]);
+  function saveOcrUrl() {
+    try {
+      setConfiguredOcrApiUrl(ocrUrl);
+      const resolved=getConfiguredOcrApiUrl();
+      setOcrUrl(resolved);
+      setOcrUrlError('');
+      return true;
+    } catch (error) {
+      setOcrUrlError(error instanceof Error ? error.message : 'OCRサーバーURLを確認してください。');
+      return false;
+    }
+  }
+  function changeOcrAccessCode(value) {
+    setOcrAccessCodeState(value);
+    setOcrAccessCode(value);
+  }
   useEffect(()=>{
     if(!result) return;
     const extra=[];
@@ -32,7 +60,40 @@ export default function KeishinPdfImport({ activeYear, currentYear, importState,
   return <section style={{padding:14,borderBottom:'1px solid #ddd'}} aria-label="PDF取込">
     <input ref={input} type="file" accept=".pdf,application/pdf" style={{display:'none'}} onChange={e=>{const f=e.target.files?.[0];e.target.value='';if(f)onFileSelect(f,{forcedIndustry:industry});}}/>
     <label>建設工事の種別 <select aria-label="PDFの業種" value={industry} onChange={e=>setIndustry(e.target.value)}>{INDUSTRY_OPTIONS.map(i=><option key={i}>{i}</option>)}</select></label>{' '}
-    <button disabled={status==='reading'} onClick={()=>input.current.click()}>経審PDF取込</button> <span>{status==='reading'?'PDFを読み取っています…':status==='applied'?'確認済みの内容を反映しました':`反映先：${activeYear===0?'現在':activeYear+'年後'}`}</span>
+    <button disabled={status==='reading'} onClick={()=>{if(saveOcrUrl())input.current.click();}}>経審PDF取込</button> <span>{status==='reading'?'PDFを読み取っています…':status==='applied'?'確認済みの内容を反映しました':`反映先：${activeYear===0?'現在':activeYear+'年後'}`}</span>
+    <details style={{marginTop:10}}>
+      <summary style={{cursor:'pointer'}}>画像PDF用 OCRサーバー設定（任意）</summary>
+      <div style={{marginTop:8,fontSize:12}}>
+        <label style={{display:'block'}}>OCRサーバーURL（完全なURL）<br/>
+          <input
+            aria-label="OCRサーバーURL"
+            type="url"
+            inputMode="url"
+            placeholder="https://example.com/api/gemini-ocr"
+            value={ocrUrl}
+            onChange={e=>{setOcrUrl(e.target.value);setOcrUrlError('');}}
+            onBlur={saveOcrUrl}
+            onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();saveOcrUrl();}}}
+            style={{width:'min(100%,520px)',padding:'5px 7px',marginTop:3}}
+          />
+        </label>
+        <div style={{color:'#666',marginTop:4}}>送信先：{ocrDestination?.host||'未設定'}。画像PDFでは、PDF画像がこのOCRサーバーを経由してGeminiへ送信されます。文字PDFはOCR設定なしで読み取れます。</div>
+        <label style={{display:'block',marginTop:8}}>OCR利用コード（Gemini APIキーではありません）{ocrIsExternal?'（必須）':''}<br/>
+          <input
+            aria-label="OCR利用コード"
+            type="password"
+            autoComplete="off"
+            value={ocrAccessCode}
+            onChange={e=>changeOcrAccessCode(e.target.value)}
+            style={{width:'min(100%,280px)',padding:'5px 7px',marginTop:3}}
+          />
+          <button type="button" onClick={()=>{clearOcrAccessCode();setOcrAccessCodeState('');}} style={{marginLeft:6}}>コードを消去</button>
+        </label>
+        <div style={{color:'#666',marginTop:4}}>コードはこのタブのセッション中だけ保持し、シナリオや自動保存には含めません。</div>
+        <div style={{color:'#666',marginTop:4}}>対応URL：<code>/api/keishin-ocr</code>（旧サーバーは <code>/api/gemini-ocr</code>）。</div>
+        {ocrUrlError&&<p role="alert" style={{color:'#b3261e',margin:'5px 0 0'}}>{ocrUrlError}</p>}
+      </div>
+    </details>
     {status==='error'&&<p role="alert">{importState.error}</p>}
     {result&&status!=='reading'&&<div>
       <h4>取込内容の確認：{result.fileName}</h4>

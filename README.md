@@ -1,58 +1,78 @@
 # 経審シミュレーター
 
-## 今回の更新をReplitに反映する
+## 公開とデプロイ
 
-更新は `master` ブランチへ統合します。Replit側に未コミットの編集がある場合は、先にGitツールでコミットして保存してください。
+このプロジェクトは Replit の **Static** 公開を使います。アプリはビルド済みの `dist` を配信します。
 
-1. ReplitのShellで次を順番に実行します。途中でエラーが出たら、後続を実行せず内容を確認してください。
+```sh
+npm ci
+npm run build
+```
 
-   ```sh
-   git fetch origin
-   git switch master
-   git pull --ff-only origin master
-   npm ci
-   npm test
-   npm run build
-   ```
+Publishing の公開方式は **Static**、公開ディレクトリーは `dist` にします。Static公開では `npm start` や Autoscale の設定は使いません。OCRサーバーはこのプロジェクトとは別の既存サーバーで稼働します。
 
-2. Runを再起動し、グラフ固定、1〜10年の切替、4つの入力タブ、「現在」だけのPDF取込を確認します。操作マニュアルはグラフ下のリンク、または `/manual.html` で開けます。
-3. OCRを使う場合は、Secretsと公開環境の設定に `GEMINI_API_KEY` があることを確認します。登録済みなら同じキーを使えます。
-4. Publishingで公開設定を確認して再公開します。公開タイプは **Autoscale**、ビルドは `npm run build`、起動は `npm start`、ポートは `5173` です。Node.js 22を使用します。設定は `.replit` にも記載しています。
-5. 公開URLを再読み込みし、グラフと操作マニュアルを確認します。Gitからの取得やRunの再起動だけでは公開済みアプリは更新されません。
+既存のReplitログイン画面と、公開ビルドで使う `VITE_LOGIN_ID` / `VITE_LOGIN_PASSWORD` は保持します。値を変更したときは再ビルドと再公開が必要です。
 
-同じ公開URLを使い続けると、ブラウザーに保存している入力を引き続き利用できます。ローカルのプレビュー入力はReplitへ転送されません。
+## マージ競合からの復旧
 
-参考：[ReplitのGit操作](https://docs.replit.com/features/workspace-tools/git-interface)、[公開方式](https://docs.replit.com/features/publishing/deployment-types)、[Secrets](https://docs.replit.com/core-concepts/project-editor/app-setup/secrets)。
+現在のReplit側でマージ中の状態が残っている場合は、バックアップがリモートにあることを確認したうえで、Shellで次を順に実行します。途中でエラーが出たら後続を実行しません。
 
-## ReplitでGemini OCRを設定する
+```sh
+git merge --abort &&
+git fetch origin &&
+git switch master &&
+git pull --ff-only origin master &&
+npm ci &&
+npm test &&
+npm run build
+```
 
-1. Replitの **Secrets → New Secret** を開きます。
-2. Keyに `GEMINI_API_KEY`、ValueにGeminiのAPIキーを入力して保存します。
-3. アプリを再起動します。開発時の実行コマンドは `npm run dev` です。
-4. 建設工事の種別を選び、経審PDFを取り込みます。文字抽出で読み取れない場合、自動でGemini OCRを利用します。
+最終的な master のマージコミットが反映されるまで待ってから、Static / `dist` を再公開します。公開URLを再読み込みし、ログイン、初回案内、固定グラフ、1〜10年切替、PDF取込、操作マニュアルを確認します。Runの再起動だけではStatic公開中の画面は更新されません。
 
-APIキーはサーバーの環境変数から読み込みます。画面への入力は不要です。`VITE_` を付けた環境変数には登録しないでください（ブラウザへ公開されるため）。OCR時はPDFから作成したページ画像をサーバー経由でGeminiに送信します。
+## OCRサーバー
 
-公開は **Autoscale** または **Reserved VM** を使用してください。ビルドコマンドは `npm run build`、起動コマンドは `npm start` です。公開環境にも `GEMINI_API_KEY` が設定されていることを確認して再公開してください。Static Deploymentではサーバー側のOCRを実行できません。
+画像PDFのOCRは、既存の別プロジェクト **https://ai-interview.replit.app** のAPIを使います。Staticアプリはサーバーを起動しません。接続先は次のエンドポイントです。
 
-キー未設定でも文字を抽出できるPDFは取り込めます。OCRが必要なPDFでは、設定を促すメッセージが表示されます。
+```
+https://ai-interview.replit.app/api/keishin-ocr
+```
 
-参考: [Replit Secrets](https://docs.replit.com/core-concepts/project-editor/app-setup/secrets)、[Viteの環境変数](https://vite.dev/guide/env-and-mode)
+OCRサーバー側のSecretsと環境変数：
+
+- `GEMINI_API_KEY`：既存のAI面接サーバーのSecretsに設定済みのGemini APIキーを使います。Staticアプリやブラウザーへ公開しません。
+- `KEISHIN_OCR_ACCESS_TOKEN`：管理者が決めたOCR利用コードです。PDF取込画面で利用者が入力するコードと一致させます。
+- `KEISHIN_OCR_ALLOWED_ORIGINS`：`https://keishin-02-syumi.replit.app` を設定します。Static公開URLを変更したときだけ、許可元も更新します。
+
+Staticアプリの「現在」→「PDF取込（現在のみ）」→「画像PDF用 OCRサーバー設定（任意）」で、OCRサーバーURLとOCR利用コードを設定します。コードは現在のブラウザーセッションだけで使われ、シナリオには保存されません。Gemini APIキーを画面へ入力する欄はありません。
+
+文字PDFの読み取りはOCRサーバーなしで使えます。画像PDFでOCRを使うと、PDFのページ画像が指定サーバーを経由してGeminiへ送られます。OCRの結果はプレビューで修正・除外し、会社・期・業種・単位・読取値を原本と照合してから反映します。
+
+## ログインの範囲
+
+ReplitのID・パスワード画面とログインセッションを引き継いでいます。これはStatic画面内の簡易ログインです。`VITE_` の値は公開JavaScriptへ含まれるため、サーバー認証やOCR APIのアクセス制限にはなりません。OCR APIの保護は `KEISHIN_OCR_ACCESS_TOKEN` と許可オリジンの設定で行います。
 
 ## ローカル開発
 
-Node.js 22以降を使用します。`npm install` を実行し、`.env.example` を `.env` にコピーして `GEMINI_API_KEY` を設定した後、`npm run dev` を実行します。`.env` はGitの対象外です。
+Node.js 22以降を使用します。
 
-検証: `npm test`、`npm run build`。
+```sh
+npm ci
+npm run dev
+```
+
+ローカルでは `VITE_LOGIN_ID` / `VITE_LOGIN_PASSWORD` をローカル用に設定します。OCR接続先を確認するときは、管理者から案内された完全なHTTPS URLを入力してください。
 
 ## 詳細計算・PDF実績照合
 
-新しいデータは右側の入力エリアの「財務の詳細計算と実績照合」に当期・前期の原票値を入力します。表示単位を変えても金額は維持されます。X2用の自己資本とY用の当期純資産は別管理です。空欄は未入力として扱い、不足時は詳細Y・Pを算定しません。
+新しいデータは右側の入力エリアの「財務の詳細計算と実績照合」に当期・前期の原票値を入力します。表示単位を変えても金額は維持されます。空欄は未入力として扱い、不足時は詳細Y・Pを算定しません。
 
-PDFは業種を指定して取り込み、確認画面で会社・期・単位・数値を原本と照合してから反映します。通知書の評点は比較用に保存され、W等を自動上書きしません。申請日が不明な資料のW・Pは正式な一致率から除外します。
+PDFは業種を指定して取り込み、確認画面で会社・期・単位・数値を原本と照合してから反映します。通知書の評点は比較用に保存され、W等を自動上書きしません。簡易CF・簡易Y・将来コピーは参考推計です。新しい詳細計算の財務値は入札や売上スライダーから自動生成されません。
 
-各期CFの直接入力、2期平均CFの入力、残高増減からのCF計算に対応します。簡易CF・簡易Y・将来コピーは参考推計です。新しい詳細計算の財務値は入札や売上スライダーから自動生成されません。
+検証結果と対象範囲：[検証レポート](docs/accuracy-validation-results.md)。
 
-旧保存データは旧方式を保持します。「新しい詳細計算へ切替」を選び、不足する原票値を補完してください。保存形式は2で、更新前データのバックアップをブラウザ内に保持します。
+## 参照
 
-実PDFによる確認結果と対象範囲：[検証レポート](docs/accuracy-validation-results.md)。
+- [ReplitのGit操作](https://docs.replit.com/features/workspace-tools/git-interface)
+- [Static公開](https://docs.replit.com/features/publishing/deployment-types)
+- [Replit Secrets](https://docs.replit.com/core-concepts/project-editor/app-setup/secrets)
+- [Viteの環境変数](https://vite.dev/guide/env-and-mode)

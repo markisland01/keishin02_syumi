@@ -43,7 +43,7 @@ P = 0.25×X1 + 0.15×X2 + 0.20×Y + 0.25×Z + 0.15×W
 
 OCRサーバー側：
 
-- `GEMINI_API_KEY`：AI面接サーバーの既存Secrets
+- `KEISHIN_GEMINI_API_KEY`：AI面接サーバーのSecretsに新設する経審OCR専用キー。面接用 `GEMINI_API_KEY` と分け、専用キーがない場合はOCRを停止します。
 - `KEISHIN_OCR_ACCESS_TOKEN`：管理者が決めたOCR利用コード
 - `KEISHIN_OCR_ALLOWED_ORIGINS=https://keishin-02-syumi.replit.app`
 

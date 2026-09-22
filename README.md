@@ -39,7 +39,7 @@ https://ai-interview.replit.app/api/keishin-ocr
 
 OCRサーバー側のSecretsと環境変数：
 
-- `GEMINI_API_KEY`：既存のAI面接サーバーのSecretsに設定済みのGemini APIキーを使います。Staticアプリやブラウザーへ公開しません。
+- `KEISHIN_GEMINI_API_KEY`：AI面接サーバーのSecretsに新設する経審OCR専用キーです。面接用の既存 `GEMINI_API_KEY` は変更しません。OCRは専用キーだけを使い、未設定時に面接用キーへ切り替わりません。Staticアプリやブラウザーへ公開しません。
 - `KEISHIN_OCR_ACCESS_TOKEN`：管理者が決めたOCR利用コードです。PDF取込画面で利用者が入力するコードと一致させます。
 - `KEISHIN_OCR_ALLOWED_ORIGINS`：`https://keishin-02-syumi.replit.app` を設定します。Static公開URLを変更したときだけ、許可元も更新します。
 

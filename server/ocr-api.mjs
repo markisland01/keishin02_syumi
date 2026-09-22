@@ -7,7 +7,7 @@ function json(res, status, value) {
   res.end(JSON.stringify(value));
 }
 
-export function createOcrMiddleware({ getApiKey = () => process.env.GEMINI_API_KEY, runOcr = runGeminiOcr } = {}) {
+export function createOcrMiddleware({ getApiKey = () => process.env.KEISHIN_GEMINI_API_KEY, runOcr = runGeminiOcr } = {}) {
   return async (req, res, next) => {
     if (req.url?.split('?')[0] !== '/api/gemini-ocr') return next();
     if (req.method !== 'POST') {
@@ -18,7 +18,7 @@ export function createOcrMiddleware({ getApiKey = () => process.env.GEMINI_API_K
       return json(res, 415, { error: 'JSON形式で送信してください。' });
     }
     const apiKey = String(getApiKey() || '').trim();
-    if (!apiKey) return json(res, 503, { error: 'OCRが未設定です。管理者がReplit SecretsにGEMINI_API_KEYを登録してください。' });
+    if (!apiKey) return json(res, 503, { error: 'OCRが未設定です。管理者がOCRサーバーのSecretsにKEISHIN_GEMINI_API_KEYを登録してください。' });
 
     let body;
     try {

@@ -42,7 +42,32 @@ test('missing secret is actionable without an upstream call', async t => {
   await withApi(t, { getApiKey: () => '', runOcr: () => assert.fail('must not call Gemini') }, async post => {
     const response = await post({ images });
     assert.equal(response.status, 503);
-    assert.match((await response.json()).error, /GEMINI_API_KEY/);
+    assert.match((await response.json()).error, /KEISHIN_GEMINI_API_KEY/);
+  });
+});
+
+test('local OCR uses its dedicated environment key and never falls back to the interview key', async t => {
+  const priorOcrKey = process.env.KEISHIN_GEMINI_API_KEY;
+  const priorInterviewKey = process.env.GEMINI_API_KEY;
+  t.after(() => {
+    if (priorOcrKey === undefined) delete process.env.KEISHIN_GEMINI_API_KEY;
+    else process.env.KEISHIN_GEMINI_API_KEY = priorOcrKey;
+    if (priorInterviewKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = priorInterviewKey;
+  });
+  process.env.GEMINI_API_KEY = 'interview-only-secret';
+  delete process.env.KEISHIN_GEMINI_API_KEY;
+  let calls = 0;
+  await withApi(t, { runOcr: async (_images, key) => {
+    calls += 1;
+    assert.equal(key, 'dedicated-ocr-secret');
+    return { data: {}, text: '{}', model: 'test' };
+  } }, async post => {
+    assert.equal((await post({ images })).status, 503);
+    assert.equal(calls, 0);
+    process.env.KEISHIN_GEMINI_API_KEY = 'dedicated-ocr-secret';
+    assert.equal((await post({ images })).status, 200);
+    assert.equal(calls, 1);
   });
 });
 

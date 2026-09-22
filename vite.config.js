@@ -3,9 +3,9 @@ import react from '@vitejs/plugin-react';
 import { createOcrMiddleware } from './server/ocr-api.mjs';
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, process.cwd(), ['GEMINI_']);
+  const env = loadEnv(mode, process.cwd(), ['KEISHIN_GEMINI_']);
   const ocrApi = () => createOcrMiddleware({
-    getApiKey: () => process.env.GEMINI_API_KEY ?? env.GEMINI_API_KEY,
+    getApiKey: () => process.env.KEISHIN_GEMINI_API_KEY ?? env.KEISHIN_GEMINI_API_KEY,
   });
   return {
     plugins: [react(), {
